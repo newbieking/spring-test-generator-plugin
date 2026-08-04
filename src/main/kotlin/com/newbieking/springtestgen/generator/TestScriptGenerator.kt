@@ -1,5 +1,6 @@
 package com.newbieking.springtestgen.generator
 
+import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
 import com.newbieking.springtestgen.psi.EndpointMetadata
 import com.newbieking.springtestgen.services.AIGenerationService
@@ -10,6 +11,8 @@ import com.newbieking.springtestgen.services.SettingsService
  * 测试脚本生成器，生成 JUnit 5 + MockMvc 代码
  */
 class TestScriptGenerator(private val project: Project) {
+
+    private val log = Logger.getInstance(TestScriptGenerator::class.java)
 
     private val aiService: AIGenerationService? by lazy {
         val settings = SettingsService.getInstance(project)
@@ -28,6 +31,7 @@ class TestScriptGenerator(private val project: Project) {
         testClassName: String,
         useAI: Boolean
     ): String {
+        require(endpoints.isNotEmpty()) { "At least one endpoint is required to generate a test class." }
         val controllerName = endpoints.first().controllerClass.name
         val packageName = endpoints.first().controllerClass.qualifiedName
             ?.substringBeforeLast('.') ?: ""
@@ -45,11 +49,12 @@ class TestScriptGenerator(private val project: Project) {
             }
         }
 
+        log.info("Generating test class '$testClassName' for ${endpoints.size} endpoint(s); AI enabled: $useAI")
         val methods = endpoints.map { endpoint ->
             generateTestMethod(endpoint, useAI)
         }.joinToString("\n\n")
 
-        return """
+        val generatedClass = """
 package ${packageName}test;
 
 $imports
@@ -65,15 +70,17 @@ public class $testClassName {
     $methods
 }
         """.trimIndent()
+        log.info("Generated test class '$testClassName' (${generatedClass.length} characters)")
+        return generatedClass
     }
 
     private suspend fun generateTestMethod(endpoint: EndpointMetadata, useAI: Boolean): String {
-        println("endpoint: $endpoint")
         val methodName = endpoint.method.name
         val capitalizedName = methodName.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
         val httpMethod = endpoint.httpMethod.name
         val path = endpoint.path
         val requestBodyType = endpoint.requestBodyType
+        log.debug("Generating test method for $httpMethod $path (${endpoint.controllerClass.name}#$methodName), request body: ${requestBodyType != null}")
 
         // 构建 MockMvc 请求
         val performBlock = buildString {
@@ -96,8 +103,12 @@ public class $testClassName {
             }
             // 添加 request body（如果有）
             if (requestBodyType != null && useAI) {
-                val mockJson = aiService?.generateMockRequestBody(endpoint) ?: "{\"field\":\"value\"}"
-                append(".contentType(MediaType.APPLICATION_JSON).content(\"$mockJson\")")
+                val mockJson = aiService?.generateMockRequestBody(endpoint)
+                if (mockJson == null) {
+                    log.warn("AI request-body generation unavailable for $httpMethod $path; using fallback JSON")
+                }
+                val content = mockJson ?: "{\"field\":\"value\"}"
+                append(".contentType(MediaType.APPLICATION_JSON).content(\"$content\")")
             } else if (requestBodyType != null) {
                 append(".contentType(MediaType.APPLICATION_JSON).content(\"{}\")")
             }

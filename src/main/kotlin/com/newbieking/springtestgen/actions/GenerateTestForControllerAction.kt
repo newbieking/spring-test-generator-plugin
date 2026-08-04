@@ -5,6 +5,7 @@ import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.command.WriteCommandAction
+import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.progress.Task
@@ -24,6 +25,8 @@ import kotlinx.coroutines.runBlocking
  */
 class GenerateTestForControllerAction : AnAction() {
 
+    private val log = Logger.getInstance(GenerateTestForControllerAction::class.java)
+
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
         val psiFile = e.getData(CommonDataKeys.PSI_FILE) ?: return
@@ -33,10 +36,15 @@ class GenerateTestForControllerAction : AnAction() {
 
         val parser = SpringEndpointParser(PsiManager.getInstance(project))
         val endpoints = parser.parseController(targetClass)
-        if (endpoints.isEmpty()) return
+        if (endpoints.isEmpty()) {
+            log.warn("No Spring endpoints found in class: ${targetClass.qualifiedName ?: targetClass.name}")
+            return
+        }
+        log.info("Generate tests action invoked for controller: ${targetClass.qualifiedName ?: targetClass.name} (${endpoints.size} endpoint(s))")
 
         val dialog = GenerateTestDialog(project, endpoints)
         if (dialog.showAndGet()) {
+            log.info("Starting test generation for ${endpoints.size} endpoint(s)")
             ProgressManager.getInstance().run(object : Task.Backgroundable(
                 project, "Generating Tests for All Endpoints", true
             ) {
@@ -50,6 +58,7 @@ class GenerateTestForControllerAction : AnAction() {
                             dialog.isAIEnabled()
                         )
                     }
+                    log.info("Test source generated for ${endpoints.size} endpoint(s)")
                     ApplicationManager.getApplication().invokeLater {
                         WriteCommandAction.runWriteCommandAction(project) {
                             writeTestFile(project, dialog.getTestClassName(), testClass)
@@ -95,11 +104,16 @@ class GenerateTestForControllerAction : AnAction() {
                 val existingFile = psiDir.findFile(fileName)
                 if (existingFile != null) {
                     PsiUtils.setContent(existingFile, content)
+                    log.info("Updated generated test file: ${existingFile.virtualFile.path}")
                 } else {
-                    psiDir.createFile(fileName).let { PsiUtils.setContent(it, content) }
+                    psiDir.createFile(fileName).let {
+                        PsiUtils.setContent(it, content)
+                        log.info("Created generated test file: ${it.virtualFile.path}")
+                    }
                 }
             }
         } else {
+            log.warn("Unable to write generated test '$testClassName': src/test/java directory not found in ${project.basePath}")
             Messages.showWarningDialog(
                 project,
                 "Could not find src/test/java directory.",

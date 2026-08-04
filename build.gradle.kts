@@ -22,6 +22,10 @@ intellij {
 }
 
 tasks {
+    runIde {
+        systemProperty("idea.log.debug.categories", "com.newbieking.springtestgen")
+    }
+
     withType<JavaCompile> {
         sourceCompatibility = "17"
         targetCompatibility = "17"
@@ -43,5 +47,9 @@ tasks {
 
     publishPlugin {
         token.set(System.getenv("PUBLISH_TOKEN"))
+    }
+
+    runIde {
+        jvmArgs("-Didea.log.debug.categories=#com.newbieking")
     }
 }

@@ -46,6 +46,7 @@ class OpenAIApiClient(private val settings: SettingsService) : AIGenerationServi
         return withContext(Dispatchers.IO) {
             try {
                 val config = settings.getConfig()
+                log.info("Sending AI generation request (model: ${config.model}, endpoint: ${config.baseUrl.trimEnd('/')}/chat/completions)")
 
                 // 构建 messages JSON 数组
                 val messagesArray = JsonArray().apply {
@@ -74,15 +75,17 @@ class OpenAIApiClient(private val settings: SettingsService) : AIGenerationServi
                     val json = JsonParser.parseString(response.body()).asJsonObject
                     val choices = json.get("choices")?.asJsonArray
                     if (choices != null && choices.size() > 0) {
-                        choices.get(0).asJsonObject
+                        val content = choices.get(0).asJsonObject
                             .get("message")?.asJsonObject
                             ?.get("content")?.asString
+                        log.info("AI generation request completed successfully (response length: ${content?.length ?: 0})")
+                        content
                     } else {
                         log.warn("AI API returned empty or missing choices array")
                         null
                     }
                 } else {
-                    log.warn("AI API error: ${response.statusCode()} - ${response.body()}")
+                    log.warn("AI API request failed with HTTP ${response.statusCode()} (response length: ${response.body().length})")
                     null
                 }
             } catch (e: Exception) {

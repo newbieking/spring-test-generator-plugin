@@ -1,11 +1,14 @@
 package com.newbieking.springtestgen.psi
 
+import com.intellij.openapi.diagnostic.Logger
 import com.intellij.psi.*
 
 /**
  * PSI 解析器，提取 Spring Web 端点信息
  */
 class SpringEndpointParser(private val project: PsiManager) {
+
+    private val log = Logger.getInstance(SpringEndpointParser::class.java)
 
     private companion object {
         val MAPPING_ANNOTATIONS = listOf(
@@ -22,9 +25,14 @@ class SpringEndpointParser(private val project: PsiManager) {
      * 扫描当前类中所有符合端点条件的方法
      */
     fun parseController(psiClass: PsiClass): List<EndpointMetadata> {
-        if (!isController(psiClass)) return emptyList()
+        val controllerName = psiClass.qualifiedName ?: psiClass.name ?: "<anonymous>"
+        if (!isController(psiClass)) {
+            log.debug("Skipping non-controller class: $controllerName")
+            return emptyList()
+        }
         val classPath = getClassRequestMapping(psiClass)
-        return psiClass.allMethods
+        log.debug("Parsing Spring controller: $controllerName (base path: '$classPath')")
+        val endpoints = psiClass.allMethods
             .filter { isHandlerMethod(it) }
             .mapNotNull { method ->
                 val methodPath = getMethodRequestMapping(method) ?: return@mapNotNull null
@@ -43,6 +51,8 @@ class SpringEndpointParser(private val project: PsiManager) {
                     pathVariables = pathVars
                 )
             }
+        log.debug("Parsed ${endpoints.size} endpoint(s) from controller: $controllerName")
+        return endpoints
     }
 
     /**
@@ -131,6 +141,7 @@ class SpringEndpointParser(private val project: PsiManager) {
     }
 
     private fun extractRequestParams(method: PsiMethod): List<RequestParam> {
+        log.debug("extractRequestParams: ${method.parameterList.parameters.toList()}")
         val result = mutableListOf<RequestParam>()
         for (param in method.parameterList.parameters) {
             val anno = param.getAnnotation("org.springframework.web.bind.annotation.RequestParam")
@@ -140,6 +151,9 @@ class SpringEndpointParser(private val project: PsiManager) {
                 val required = (anno.findAttributeValue("required") as? PsiLiteralExpression)?.text?.toBoolean() ?: true
                 result.add(RequestParam(name, param.type.canonicalText, required))
             }
+        }
+        if (result.isNotEmpty()) {
+            log.debug("Extracted ${result.size} request parameter(s) from method: ${method.name}")
         }
         return result
     }
