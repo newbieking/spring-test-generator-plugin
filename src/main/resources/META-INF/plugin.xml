@@ -1,0 +1,44 @@
+<idea-plugin>
+    <id>com.newbieking.spring-test-generator</id>
+    <name>Spring Boot Test Generator</name>
+    <vendor email="support@example.com" url="https://example.com">Example</vendor>
+
+    <description><![CDATA[
+        Automatically generate MockMvc test scripts for Spring Boot web endpoints.
+        AI-powered data generation (OpenAI-compatible) supported.
+    ]]></description>
+
+    <depends>com.intellij.modules.java</depends>
+    <depends optional="true">org.jetbrains.kotlin</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <!-- 设置页 -->
+        <projectConfigurable instance="com.newbieking.springtestgen.ui.SettingsConfigurable"
+                             displayName="Spring Test Generator"
+                             id="spring.test.generator.settings"/>
+
+        <!-- Gutter 图标提供者 -->
+        <codeInsight.lineMarkerProvider language="JAVA"
+                                        implementationClass="com.newbieking.springtestgen.actions.GenerateTestForMethodAction$LineMarkerProvider"/>
+        <codeInsight.lineMarkerProvider language="kotlin"
+                                        implementationClass="com.newbieking.springtestgen.actions.GenerateTestForMethodAction$LineMarkerProvider"/>
+
+        <!-- 后台服务 -->
+        <projectService serviceImplementation="com.newbieking.springtestgen.services.SettingsService"/>
+    </extensions>
+
+    <actions>
+        <!-- 针对方法生成（Gutter 点击也会触发此 Action） -->
+        <action id="GenerateTestForMethod" class="com.newbieking.springtestgen.actions.GenerateTestForMethodAction"
+                text="Generate Test for Endpoint" description="Generate MockMvc test for this endpoint">
+            <add-to-group group-id="EditorPopupMenu" anchor="first"/>
+            <keyboard-shortcut keymap="$default" first-keystroke="ctrl alt T"/>
+        </action>
+
+        <!-- 批量生成 Controller 所有端点 -->
+        <action id="GenerateTestForController" class="com.newbieking.springtestgen.actions.GenerateTestForControllerAction"
+                text="Generate Tests for All Endpoints" description="Generate tests for all endpoints in this controller">
+            <add-to-group group-id="EditorPopupMenu" anchor="after" relative-to-action="GenerateTestForMethod"/>
+        </action>
+    </actions>
+</idea-plugin>
