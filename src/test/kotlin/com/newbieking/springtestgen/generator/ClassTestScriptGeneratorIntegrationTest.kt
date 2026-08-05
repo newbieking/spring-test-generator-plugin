@@ -47,20 +47,35 @@ class ClassTestScriptGeneratorIntegrationTest : BasePlatformTestCase() {
             @org.springframework.stereotype.Repository
             interface PaymentRepository { }
 
+            @org.springframework.stereotype.Repository
+            interface OrderRepository {
+                java.util.List<Order> findByUserId(String userId);
+            }
+
+            @org.apache.ibatis.annotations.Mapper
+            interface OrderMapper {
+                Order findById(String id);
+            }
+
             class StringUtils {
                 public static String normalize(String input) { return input.trim(); }
             }
 
             class Receipt { }
+            class Order { }
             """.trimIndent()
         )
         val parser = ClassUnderTestParser()
         val service = parser.parse(findClass(file, "PaymentService"))
         val utility = parser.parse(findClass(file, "StringUtils"))
+        val repository = parser.parse(findClass(file, "OrderRepository"))
+        val mapper = parser.parse(findClass(file, "OrderMapper"))
         val generator = ClassTestScriptGenerator()
 
         val serviceSource = generator.generateTestClass(service, "PaymentServiceTest")
         val utilitySource = generator.generateTestClass(utility, "StringUtilsTest")
+        val repositorySource = generator.generateTestClass(repository, "OrderRepositoryTest")
+        val mapperSource = generator.generateTestClass(mapper, "OrderMapperTest")
 
         assertTrue(serviceSource.contains("package sample.test;"))
         assertTrue(serviceSource.contains("import sample.PaymentService;"))
@@ -74,9 +89,20 @@ class ClassTestScriptGeneratorIntegrationTest : BasePlatformTestCase() {
         assertTrue(utilitySource.contains("import sample.StringUtils;"))
         assertTrue(utilitySource.contains("testNormalizeHappyPath"))
         assertTrue(!utilitySource.contains("MockitoExtension"))
+        assertTrue(repositorySource.contains("import sample.OrderRepository;"))
+        assertTrue(repositorySource.contains("@Mock"))
+        assertTrue(!repositorySource.contains("@InjectMocks"))
+        assertTrue(repositorySource.contains("testFindByUserIdHappyPath"))
+        assertTrue(repositorySource.contains("testFindByUserIdEmptyResult"))
+        assertTrue(repositorySource.contains("testFindByUserIdDuplicateResult"))
+        assertTrue(repositorySource.contains("testFindByUserIdPersistenceException"))
+        assertTrue(repositorySource.contains("testFindByUserIdTransactionFailure"))
+        assertTrue(mapperSource.contains("import sample.OrderMapper;"))
 
         assertNoSyntaxErrors("PaymentServiceTest.java", serviceSource)
         assertNoSyntaxErrors("StringUtilsTest.java", utilitySource)
+        assertNoSyntaxErrors("OrderRepositoryTest.java", repositorySource)
+        assertNoSyntaxErrors("OrderMapperTest.java", mapperSource)
     }
 
     private fun assertNoSyntaxErrors(fileName: String, source: String) {

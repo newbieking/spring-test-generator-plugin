@@ -9,7 +9,7 @@ import com.newbieking.springtestgen.strategy.TestStrategySelection
 import com.newbieking.springtestgen.testcase.ClassTestScenario
 import com.newbieking.springtestgen.testcase.DeterministicClassTestCaseGenerator
 
-/** Generates editable JUnit 5 tests for utility and Service/Component classes. */
+/** Generates editable JUnit 5 tests for utility, Service/Component, Repository, and Mapper targets. */
 class ClassTestScriptGenerator(
     private val strategyRegistry: TestStrategyRegistry = TestStrategyRegistry(),
     private val scenarioGenerator: DeterministicClassTestCaseGenerator = DeterministicClassTestCaseGenerator()
@@ -65,9 +65,9 @@ class ClassTestScriptGenerator(
         if (scenarios.any { it.disabledReason != null }) add("org.junit.jupiter.api.Disabled")
         if (usesMockito) {
             add("org.junit.jupiter.api.extension.ExtendWith")
-            add("org.mockito.InjectMocks")
             add("org.mockito.Mock")
             add("org.mockito.junit.jupiter.MockitoExtension")
+            if (!metadata.isInterface) add("org.mockito.InjectMocks")
         }
         add("org.junit.jupiter.api.Assertions.assertDoesNotThrow")
     }.sorted().joinToString("\n") { "import $it;" }
@@ -87,7 +87,7 @@ class ClassTestScriptGenerator(
                     appendLine("    @Mock")
                     appendLine("    private ${sourceTypeName(dependency.type)} ${dependency.name};")
                 }
-            appendLine("    @InjectMocks")
+            appendLine(if (metadata.isInterface) "    @Mock" else "    @InjectMocks")
             append("    private ${sourceTypeName(metadata.simpleName)} ${targetFieldName(metadata)};")
         } else if (utilityHasInstanceMethods) {
             if (utilityCanInstantiate) {
@@ -123,12 +123,18 @@ class ClassTestScriptGenerator(
                 appendLine("@Disabled(\"${escapeJavaString(disabledReason)}\")")
             }
             appendLine("@Test")
-            appendLine("void $testMethodName() {")
+            appendLine("void $testMethodName() throws Exception {")
             appendLine("    // ${scenario.displayName}")
             if (disabledReason != null) {
                 appendLine("    // TODO: $disabledReason")
             }
-            appendLine("    assertDoesNotThrow(() -> $invocation);")
+            if (metadata.isInterface && disabledReason == null) {
+                appendLine("    $invocation;")
+                append("    org.mockito.Mockito.verify($target).${scenario.method.name}($arguments);")
+            } else {
+                append("    assertDoesNotThrow(() -> $invocation);")
+            }
+            appendLine()
             append("}")
         }.prependIndent("    ")
     }
@@ -146,7 +152,13 @@ class ClassTestScriptGenerator(
         .replace("\n", "\\n")
 
     private companion object {
-        val SUPPORTED_TARGET_TYPES = setOf(TargetType.UTILITY, TargetType.SERVICE, TargetType.COMPONENT)
+        val SUPPORTED_TARGET_TYPES = setOf(
+            TargetType.UTILITY,
+            TargetType.SERVICE,
+            TargetType.COMPONENT,
+            TargetType.REPOSITORY,
+            TargetType.MAPPER
+        )
         val QUALIFIED_TYPE_TOKEN = Regex("[A-Za-z_][A-Za-z0-9_$.]*")
     }
 }
