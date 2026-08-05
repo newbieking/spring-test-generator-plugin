@@ -51,64 +51,95 @@ class DeterministicTestCaseGenerator {
             )
         }
         if (bodyValidated && bodySchema != null) {
-            bodySchema.fields.forEach { field -> addFieldPlans(plans, bodySchema, field) }
+            addFieldPlans(plans, bodySchema, bodySchema)
         }
         return plans
     }
 
-    private fun addFieldPlans(plans: MutableList<TestScenarioPlan>, schema: RequestBodySchema, field: RequestFieldSchema) {
+    private fun addFieldPlans(
+        plans: MutableList<TestScenarioPlan>,
+        rootSchema: RequestBodySchema,
+        schema: RequestBodySchema,
+        fieldPathPrefix: String = ""
+    ) {
+        schema.fields.forEach { field ->
+            val fieldPath = if (fieldPathPrefix.isBlank()) field.name else "$fieldPathPrefix.${field.name}"
+            if (field.nestedSchema != null) {
+                addScalarFieldPlans(plans, rootSchema, field, fieldPath)
+                addFieldPlans(plans, rootSchema, field.nestedSchema, fieldPath)
+            } else {
+                addScalarFieldPlans(plans, rootSchema, field, fieldPath)
+            }
+        }
+    }
+
+    private fun addScalarFieldPlans(
+        plans: MutableList<TestScenarioPlan>,
+        schema: RequestBodySchema,
+        field: RequestFieldSchema,
+        fieldPath: String
+    ) {
         val constraints = field.constraints
         if (constraints.required) {
             plans += bodyMutation(
-                schema, "missing-${field.name}", "Missing required body field '${field.name}'",
+                schema, "missing-${fieldPath.replace('.', '-')}", fieldPath,
+                "Missing required body field '$fieldPath'",
                 TestScenarioType.MISSING_REQUIRED_BODY_FIELD
-            ) { it.remove(field.name) }
+            ) { parent, name -> parent.remove(name) }
             plans += bodyMutation(
-                schema, "null-${field.name}", "Null required body field '${field.name}'",
+                schema, "null-${fieldPath.replace('.', '-')}", fieldPath,
+                "Null required body field '$fieldPath'",
                 TestScenarioType.NULL_REQUIRED_BODY_FIELD
-            ) { it.add(field.name, JsonNull.INSTANCE) }
+            ) { parent, name -> parent.add(name, JsonNull.INSTANCE) }
         }
         if (constraints.notBlank) {
             plans += bodyMutation(
-                schema, "blank-${field.name}", "Blank body field '${field.name}'",
+                schema, "blank-${fieldPath.replace('.', '-')}", fieldPath,
+                "Blank body field '$fieldPath'",
                 TestScenarioType.BLANK_BODY_FIELD
-            ) { it.addProperty(field.name, "") }
+            ) { parent, name -> parent.addProperty(name, "") }
         }
         constraints.minLength?.takeIf { it > 0 }?.let { minLength ->
             plans += bodyMutation(
-                schema, "short-${field.name}", "Body field '${field.name}' below minimum length",
+                schema, "short-${fieldPath.replace('.', '-')}", fieldPath,
+                "Body field '$fieldPath' below minimum length",
                 TestScenarioType.BODY_FIELD_TOO_SHORT
-            ) { it.addProperty(field.name, "a".repeat((minLength - 1).coerceAtLeast(0))) }
+            ) { parent, name -> parent.addProperty(name, "a".repeat((minLength - 1).coerceAtLeast(0))) }
         }
         constraints.maxLength?.let { maxLength ->
             plans += bodyMutation(
-                schema, "long-${field.name}", "Body field '${field.name}' above maximum length",
+                schema, "long-${fieldPath.replace('.', '-')}", fieldPath,
+                "Body field '$fieldPath' above maximum length",
                 TestScenarioType.BODY_FIELD_TOO_LONG
-            ) { it.addProperty(field.name, "a".repeat((maxLength + 1).coerceAtMost(1024))) }
+            ) { parent, name -> parent.addProperty(name, "a".repeat((maxLength + 1).coerceAtMost(1024))) }
         }
         constraints.minimum?.toBigDecimalOrNull()?.let { minimum ->
             plans += bodyMutation(
-                schema, "below-min-${field.name}", "Body field '${field.name}' below minimum",
+                schema, "below-min-${fieldPath.replace('.', '-')}", fieldPath,
+                "Body field '$fieldPath' below minimum",
                 TestScenarioType.BODY_FIELD_BELOW_MINIMUM
-            ) { it.add(field.name, JsonPrimitive(minimum - BigDecimal.ONE)) }
+            ) { parent, name -> parent.add(name, JsonPrimitive(minimum - BigDecimal.ONE)) }
         }
         constraints.maximum?.toBigDecimalOrNull()?.let { maximum ->
             plans += bodyMutation(
-                schema, "above-max-${field.name}", "Body field '${field.name}' above maximum",
+                schema, "above-max-${fieldPath.replace('.', '-')}", fieldPath,
+                "Body field '$fieldPath' above maximum",
                 TestScenarioType.BODY_FIELD_ABOVE_MAXIMUM
-            ) { it.add(field.name, JsonPrimitive(maximum + BigDecimal.ONE)) }
+            ) { parent, name -> parent.add(name, JsonPrimitive(maximum + BigDecimal.ONE)) }
         }
     }
 
     private fun bodyMutation(
         schema: RequestBodySchema,
         idSuffix: String,
+        fieldPath: String,
         displayName: String,
         scenarioType: TestScenarioType,
-        mutation: (JsonObject) -> Unit
+        mutation: (JsonObject, String) -> Unit
     ): TestScenarioPlan {
         val body = buildValidBodyObject(schema)
-        mutation(body)
+        val parent = parentObject(body, fieldPath)
+        mutation(parent, fieldPath.substringAfterLast('.'))
         return TestScenarioPlan(
             idSuffix = idSuffix,
             displayName = displayName,
@@ -118,6 +149,15 @@ class DeterministicTestCaseGenerator {
         )
     }
 
+    private fun parentObject(body: JsonObject, path: String): JsonObject {
+        val segments = path.split('.')
+        var current = body
+        segments.dropLast(1).forEach { segment ->
+            current = current.getAsJsonObject(segment)
+        }
+        return current
+    }
+
     private fun buildValidBody(schema: RequestBodySchema?): String? = schema?.let(::buildValidBodyObject)?.toString()
 
     private fun buildValidBodyObject(schema: RequestBodySchema): JsonObject = JsonObject().apply {
@@ -125,6 +165,7 @@ class DeterministicTestCaseGenerator {
     }
 
     private fun validValue(field: RequestFieldSchema) = when {
+        field.nestedSchema != null -> buildValidBodyObject(field.nestedSchema)
         field.defaultValue != null -> JsonPrimitive(field.defaultValue)
         field.type in setOf("boolean", "java.lang.Boolean") -> JsonPrimitive(true)
         field.type in setOf("byte", "short", "int", "long", "float", "double", "java.lang.Byte", "java.lang.Short", "java.lang.Integer", "java.lang.Long", "java.lang.Float", "java.lang.Double", "java.math.BigDecimal") ->

@@ -11,7 +11,8 @@ data class RequestFieldSchema(
     val name: String,
     val type: String,
     val constraints: ValidationConstraints = ValidationConstraints(),
-    val defaultValue: String? = null
+    val defaultValue: String? = null,
+    val nestedSchema: RequestBodySchema? = null
 )
 
 data class ValidationConstraints(

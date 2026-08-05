@@ -11,20 +11,28 @@ import com.intellij.psi.PsiType
 /** Extracts stable DTO field and Bean Validation snapshots from Java PSI. */
 class DtoSchemaResolver(private val psiManager: PsiManager) {
 
-    fun resolve(type: PsiType): RequestBodySchema? {
+    fun resolve(type: PsiType): RequestBodySchema? = resolve(type, emptySet())
+
+    private fun resolve(type: PsiType, visitedTypes: Set<String>): RequestBodySchema? {
         val psiClass = (type as? PsiClassType)?.resolve() ?: return null
-        if (psiClass.qualifiedName?.startsWith("java.") == true) return null
+        val qualifiedName = psiClass.qualifiedName
+        if (qualifiedName?.startsWith("java.") == true ||
+            (qualifiedName != null && qualifiedName in visitedTypes)
+        ) {
+            return null
+        }
+        val nextVisitedTypes = if (qualifiedName == null) visitedTypes else visitedTypes + qualifiedName
 
         return RequestBodySchema(
             typeName = type.presentableText,
-            qualifiedName = psiClass.qualifiedName,
+            qualifiedName = qualifiedName,
             fields = psiClass.allFields
                 .filterNot { it.hasModifierProperty("static") }
-                .map(::toFieldSchema)
+                .map { toFieldSchema(it, nextVisitedTypes) }
         )
     }
 
-    private fun toFieldSchema(field: PsiField): RequestFieldSchema {
+    private fun toFieldSchema(field: PsiField, visitedTypes: Set<String>): RequestFieldSchema {
         val annotations = field.annotations.associateBy { it.qualifiedName }
         val size = annotations["jakarta.validation.constraints.Size"]
             ?: annotations["javax.validation.constraints.Size"]
@@ -60,7 +68,8 @@ class DtoSchemaResolver(private val psiManager: PsiManager) {
                 maximum = attributeValue(max, "value"),
                 pattern = attributeValue(pattern, "regexp")
             ),
-            defaultValue = attributeValue(schema, "defaultValue")
+            defaultValue = attributeValue(schema, "defaultValue"),
+            nestedSchema = resolve(field.type, visitedTypes)
         )
     }
 

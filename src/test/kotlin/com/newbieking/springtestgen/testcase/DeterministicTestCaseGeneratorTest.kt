@@ -73,4 +73,57 @@ class DeterministicTestCaseGeneratorTest {
         assertTrue(plans.any { it.scenarioType == TestScenarioType.BODY_FIELD_BELOW_MINIMUM && it.requestBodyJson.orEmpty().contains("\"amount\":17") })
         assertTrue(plans.any { it.scenarioType == TestScenarioType.BODY_FIELD_ABOVE_MAXIMUM && it.requestBodyJson.orEmpty().contains("\"amount\":61") })
     }
+
+    @Test
+    fun `recurses into nested dto fields while keeping the complete request body`() {
+        val schema = RequestBodySchema(
+            typeName = "CreateOrderRequest",
+            qualifiedName = "example.CreateOrderRequest",
+            fields = listOf(
+                RequestFieldSchema(
+                    name = "customer",
+                    type = "example.Customer",
+                    constraints = ValidationConstraints(required = true),
+                    nestedSchema = RequestBodySchema(
+                        typeName = "Customer",
+                        qualifiedName = "example.Customer",
+                        fields = listOf(
+                            RequestFieldSchema(
+                                name = "name",
+                                type = "java.lang.String",
+                                constraints = ValidationConstraints(
+                                    required = true,
+                                    notBlank = true,
+                                    minLength = 2
+                                )
+                            )
+                        )
+                    )
+                ),
+                RequestFieldSchema(name = "orderNo", type = "java.lang.String")
+            )
+        )
+
+        val plans = generator.plan(emptyList(), schema, bodyValidated = true)
+
+        assertTrue(plans.first().requestBodyJson.orEmpty().contains("\"customer\":{\"name\":\"value\"}"))
+        assertTrue(plans.any {
+            it.idSuffix == "missing-customer" &&
+                it.requestBodyJson.orEmpty().contains("\"orderNo\":\"value\"") &&
+                !it.requestBodyJson.orEmpty().contains("\"customer\"")
+        })
+        assertTrue(plans.any {
+            it.idSuffix == "null-customer" &&
+                it.requestBodyJson.orEmpty().contains("\"customer\":null")
+        })
+        assertTrue(plans.any {
+            it.idSuffix == "missing-customer-name" &&
+                it.requestBodyJson.orEmpty().contains("\"customer\":{}") &&
+                it.requestBodyJson.orEmpty().contains("\"orderNo\":\"value\"")
+        })
+        assertTrue(plans.any {
+            it.idSuffix == "short-customer-name" &&
+                it.requestBodyJson.orEmpty().contains("\"customer\":{\"name\":\"a\"}")
+        })
+    }
 }

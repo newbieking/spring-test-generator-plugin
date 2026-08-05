@@ -1,7 +1,10 @@
 package com.newbieking.springtestgen
 
 import com.intellij.psi.PsiClass
+import com.intellij.ide.highlighter.JavaFileType
+import com.intellij.psi.PsiErrorElement
 import com.intellij.psi.PsiFile
+import com.intellij.psi.PsiFileFactory
 import com.intellij.psi.PsiManager
 import com.intellij.openapi.application.ReadAction
 import com.intellij.psi.util.PsiTreeUtil
@@ -53,6 +56,15 @@ class SpringEndpointParserIntegrationTest : BasePlatformTestCase() {
                 @jakarta.validation.constraints.Min(1)
                 @jakarta.validation.constraints.Max(10)
                 int amount;
+
+                @jakarta.validation.constraints.NotNull
+                Customer customer;
+            }
+
+            class Customer {
+                @jakarta.validation.constraints.NotBlank
+                @jakarta.validation.constraints.Size(min = 2, max = 16)
+                String name;
             }
             """.trimIndent()
         )
@@ -70,7 +82,16 @@ class SpringEndpointParserIntegrationTest : BasePlatformTestCase() {
         assertEquals(listOf("page"), endpoint.requestParams.map { it.name })
         assertEquals(listOf("orderId"), endpoint.pathVariables.map { it.name })
         assertTrue(endpoint.requestBodyValidated)
-        assertEquals(setOf("username", "amount"), endpoint.requestBodySchema?.fields?.map { it.name }?.toSet())
+        assertEquals(setOf("username", "amount", "customer"), endpoint.requestBodySchema?.fields?.map { it.name }?.toSet())
+        assertEquals(
+            setOf("name"),
+            endpoint.requestBodySchema?.fields
+                ?.first { it.name == "customer" }
+                ?.nestedSchema
+                ?.fields
+                ?.map { it.name }
+                ?.toSet()
+        )
 
         val source = runBlocking {
             TestScriptGenerator(project).generateTestClass(listOf(endpoint), "OrderControllerTest", useAI = false)
@@ -80,5 +101,14 @@ class SpringEndpointParserIntegrationTest : BasePlatformTestCase() {
         assertTrue(source.contains("post(\"/orders/testValue/receive\")"))
         assertTrue(source.contains("testReceiveHappyPath"))
         assertTrue(source.contains("isBadRequest()"))
+
+        val generatedPsi = ReadAction.compute<PsiFile, RuntimeException> {
+            PsiFileFactory.getInstance(project)
+                .createFileFromText("OrderControllerTest.java", JavaFileType.INSTANCE, source)
+        }
+        val syntaxErrors = ReadAction.compute<List<PsiErrorElement>, RuntimeException> {
+            PsiTreeUtil.findChildrenOfType(generatedPsi, PsiErrorElement::class.java).toList()
+        }
+        assertTrue(syntaxErrors.isEmpty(), syntaxErrors.joinToString { it.errorDescription })
     }
 }
