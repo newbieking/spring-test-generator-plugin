@@ -2,6 +2,7 @@ package com.newbieking.springtestgen.testcase
 
 import com.newbieking.springtestgen.model.ClassUnderTestMetadata
 import com.newbieking.springtestgen.model.MethodMetadata
+import com.newbieking.springtestgen.model.TargetType
 import com.newbieking.springtestgen.model.Visibility
 
 /** Creates editable baseline scenarios without making assumptions about business assertions. */
@@ -11,12 +12,18 @@ class DeterministicClassTestCaseGenerator {
         metadata.methods
             .filter { it.visibility == Visibility.PUBLIC }
             .flatMapIndexed { index, method ->
-                generateForMethod(method, index, metadata.dependencies.isNotEmpty())
+                generateForMethod(
+                    method,
+                    index,
+                    metadata.targetType,
+                    metadata.dependencies.isNotEmpty()
+                )
             }
 
     private fun generateForMethod(
         method: MethodMetadata,
         methodOrdinal: Int,
+        targetType: TargetType,
         hasDependencies: Boolean
     ): List<ClassTestScenario> {
         val normalArguments = method.parameters.map { normalArgument(it.type) }
@@ -57,7 +64,46 @@ class DeterministicClassTestCaseGenerator {
             )
         }
 
-        if (hasDependencies) {
+        if (targetType in DAO_TARGET_TYPES) {
+            if (!method.returnType.equals("void", ignoreCase = true)) {
+                scenarios += ClassTestScenario(
+                    id = "${method.name}-$methodOrdinal-empty-result",
+                    displayName = "${method.name} empty result",
+                    method = method,
+                    methodOrdinal = methodOrdinal,
+                    scenarioType = ClassTestScenarioType.EMPTY_RESULT,
+                    arguments = normalArguments,
+                    disabledReason = "Define the expected empty-result behavior before enabling this generated scenario."
+                )
+                scenarios += ClassTestScenario(
+                    id = "${method.name}-$methodOrdinal-duplicate-result",
+                    displayName = "${method.name} duplicate result",
+                    method = method,
+                    methodOrdinal = methodOrdinal,
+                    scenarioType = ClassTestScenarioType.DUPLICATE_RESULT,
+                    arguments = normalArguments,
+                    disabledReason = "Define the expected duplicate-result behavior before enabling this generated scenario."
+                )
+            }
+            scenarios += ClassTestScenario(
+                id = "${method.name}-$methodOrdinal-persistence-exception",
+                displayName = "${method.name} persistence exception",
+                method = method,
+                methodOrdinal = methodOrdinal,
+                scenarioType = ClassTestScenarioType.PERSISTENCE_EXCEPTION,
+                arguments = normalArguments,
+                disabledReason = "Define the expected persistence exception before enabling this generated scenario."
+            )
+            scenarios += ClassTestScenario(
+                id = "${method.name}-$methodOrdinal-transaction-failure",
+                displayName = "${method.name} transaction failure",
+                method = method,
+                methodOrdinal = methodOrdinal,
+                scenarioType = ClassTestScenarioType.TRANSACTION_FAILURE,
+                arguments = normalArguments,
+                disabledReason = "Define the transaction rollback behavior before enabling this generated scenario."
+            )
+        } else if (hasDependencies) {
             scenarios += ClassTestScenario(
                 id = "${method.name}-$methodOrdinal-dependency-exception",
                 displayName = "${method.name} dependency exception",
@@ -106,6 +152,7 @@ class DeterministicClassTestCaseGenerator {
     private fun <T> List<T>.withReplaced(index: Int, value: T): List<T> = toMutableList().apply { this[index] = value }
 
     private companion object {
+        val DAO_TARGET_TYPES = setOf(TargetType.REPOSITORY, TargetType.MAPPER)
         val PRIMITIVE_TYPES = setOf("boolean", "byte", "short", "int", "long", "float", "double", "char")
         val NUMERIC_TYPES = setOf(
             "byte", "short", "int", "long", "float", "double",

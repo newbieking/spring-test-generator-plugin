@@ -6,6 +6,7 @@ data class ClassUnderTestMetadata(
     val qualifiedName: String?,
     val packageName: String,
     val targetType: TargetType,
+    val isInterface: Boolean = false,
     val annotations: Set<String> = emptySet(),
     val constructors: List<ConstructorMetadata> = emptyList(),
     val dependencies: List<DependencyMetadata> = emptyList(),

@@ -51,6 +51,7 @@ class ClassUnderTestParser {
             qualifiedName = qualifiedName,
             packageName = qualifiedName?.substringBeforeLast('.', "") ?: "",
             targetType = targetType,
+            isInterface = psiClass.isInterface,
             annotations = annotations,
             constructors = constructors,
             dependencies = constructorDependencies + fieldDependencies,

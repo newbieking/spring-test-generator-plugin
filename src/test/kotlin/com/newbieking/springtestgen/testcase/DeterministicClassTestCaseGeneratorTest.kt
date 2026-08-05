@@ -70,4 +70,41 @@ class DeterministicClassTestCaseGeneratorTest {
         assertEquals("null", scenarios.first { it.scenarioType == ClassTestScenarioType.NULL_INPUT }.arguments.first().source)
         assertEquals("", scenarios.first { it.scenarioType == ClassTestScenarioType.BOUNDARY_INPUT }.arguments.first().source.removeSurrounding("\""))
     }
+
+    @Test
+    fun `creates dao empty duplicate and persistence exception scenarios`() {
+        val metadata = ClassUnderTestMetadata(
+            simpleName = "OrderRepository",
+            qualifiedName = "sample.OrderRepository",
+            packageName = "sample",
+            targetType = TargetType.REPOSITORY,
+            isInterface = true,
+            methods = listOf(
+                MethodMetadata(
+                    name = "findByUserId",
+                    returnType = "java.util.List<sample.Order>",
+                    parameters = listOf(ParameterMetadata("userId", "java.lang.String", "java.lang.String")),
+                    declaredExceptions = emptyList(),
+                    visibility = Visibility.PUBLIC,
+                    isStatic = false
+                )
+            )
+        )
+
+        val scenarios = generator.generate(metadata)
+
+        assertEquals(
+            setOf(
+                ClassTestScenarioType.HAPPY_PATH,
+                ClassTestScenarioType.NULL_INPUT,
+                ClassTestScenarioType.BOUNDARY_INPUT,
+                ClassTestScenarioType.EMPTY_RESULT,
+                ClassTestScenarioType.DUPLICATE_RESULT,
+                ClassTestScenarioType.PERSISTENCE_EXCEPTION,
+                ClassTestScenarioType.TRANSACTION_FAILURE
+            ),
+            scenarios.map { it.scenarioType }.toSet()
+        )
+        assertTrue(scenarios.filter { it.scenarioType != ClassTestScenarioType.HAPPY_PATH }.all { it.disabledReason != null })
+    }
 }
