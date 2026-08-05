@@ -6,10 +6,12 @@ import com.newbieking.springtestgen.psi.EndpointMetadata
 import com.newbieking.springtestgen.services.AIGenerationService
 import com.newbieking.springtestgen.services.OpenAIApiClient
 import com.newbieking.springtestgen.services.SettingsService
+import com.newbieking.springtestgen.testcase.DeterministicTestCaseGenerator
+import com.newbieking.springtestgen.testcase.ExpectedHttpStatus
+import com.newbieking.springtestgen.testcase.TestCaseModel
+import com.newbieking.springtestgen.testcase.TestScenarioType
 
-/**
- * 测试脚本生成器，生成 JUnit 5 + MockMvc 代码
- */
+/** Generates JUnit 5 and MockMvc tests from deterministic test-case models. */
 class TestScriptGenerator(private val project: Project) {
 
     private val log = Logger.getInstance(TestScriptGenerator::class.java)
@@ -19,13 +21,8 @@ class TestScriptGenerator(private val project: Project) {
         if (settings.getConfig().enableAI) OpenAIApiClient(settings) else null
     }
 
-    /**
-     * 生成完整的测试类源代码
-     * @param endpoints 端点列表（可能多个）
-     * @param testClassName 测试类名
-     * @param useAI 是否启用 AI
-     * @return 生成的测试类代码字符串
-     */
+    private val testCaseGenerator = DeterministicTestCaseGenerator()
+
     suspend fun generateTestClass(
         endpoints: List<EndpointMetadata>,
         testClassName: String,
@@ -34,35 +31,18 @@ class TestScriptGenerator(private val project: Project) {
         require(endpoints.isNotEmpty()) { "At least one endpoint is required to generate a test class." }
         val controllerName = endpoints.first().controllerName
         val controllerQualifiedName = endpoints.first().controllerQualifiedName
-        val controllerPackageName = controllerQualifiedName
-            ?.substringBeforeLast('.') ?: ""
+        val controllerPackageName = controllerQualifiedName?.substringBeforeLast('.') ?: ""
         val testPackageName = if (controllerPackageName.isBlank()) "test" else "$controllerPackageName.test"
 
-        val imports = buildString {
-            if (controllerQualifiedName != null) {
-                appendLine("import $controllerQualifiedName;")
-            }
-            appendLine()
-            appendLine("import org.junit.jupiter.api.Test;")
-            appendLine("import org.springframework.beans.factory.annotation.Autowired;")
-            appendLine("import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;")
-            appendLine("import org.springframework.http.MediaType;")
-            appendLine("import org.springframework.test.web.servlet.MockMvc;")
-            appendLine()
-            appendLine("import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;")
-            appendLine("import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;")
-            appendLine("import static org.springframework.test.web.servlet.result.MockMvcResultHandlers.*;")
-        }
-
-        log.info("Generating test class '$testClassName' for ${endpoints.size} endpoint(s); AI enabled: $useAI")
-        val methods = endpoints.map { endpoint ->
-            generateTestMethod(endpoint, useAI)
-        }.joinToString("\n\n")
+        val testCases = testCaseGenerator.generate(endpoints)
+        log.info("Generating test class '$testClassName' for ${testCases.size} deterministic scenario(s); AI enabled: $useAI")
+        val methods = testCases.map { testCase -> generateTestMethod(testCase, useAI) }
+            .joinToString("\n\n")
 
         val generatedClass = """
 package $testPackageName;
 
-$imports
+${buildImports(controllerQualifiedName)}
 
 @WebMvcTest($controllerName.class)
 public class $testClassName {
@@ -77,58 +57,81 @@ public class $testClassName {
         return generatedClass
     }
 
-    private suspend fun generateTestMethod(endpoint: EndpointMetadata, useAI: Boolean): String {
+    private fun buildImports(controllerQualifiedName: String?): String = buildString {
+        if (controllerQualifiedName != null) appendLine("import $controllerQualifiedName;")
+        appendLine()
+        appendLine("import org.junit.jupiter.api.Test;")
+        appendLine("import org.springframework.beans.factory.annotation.Autowired;")
+        appendLine("import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;")
+        appendLine("import org.springframework.http.MediaType;")
+        appendLine("import org.springframework.test.web.servlet.MockMvc;")
+        appendLine()
+        appendLine("import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;")
+        appendLine("import static org.springframework.test.web.servlet.result.MockMvcResultHandlers.*;")
+        appendLine("import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;")
+    }.trimEnd()
+
+    private suspend fun generateTestMethod(testCase: TestCaseModel, useAI: Boolean): String {
+        val endpoint = testCase.endpoint
         val methodName = endpoint.methodName
         val capitalizedName = methodName.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
+        val scenarioSuffix = testCase.id.substringAfter(':').split('-').joinToString("") {
+            it.replaceFirstChar { character -> character.titlecase() }
+        }
         val httpMethod = endpoint.httpMethod.name
         val path = endpoint.path
+        val resolvedPath = endpoint.pathVariables.fold(path) { currentPath, pathVariable ->
+            currentPath.replace("{${pathVariable.name}}", "testValue")
+        }
         val requestBodyType = endpoint.requestBodyType
-        log.debug("Generating test method for $httpMethod $path (${endpoint.controllerName}#$methodName), request body: ${requestBodyType != null}")
+        log.debug("Generating ${testCase.scenarioType} for $httpMethod $path (${endpoint.controllerName}#$methodName)")
 
-        // 构建 MockMvc 请求
         val performBlock = buildString {
             append("mockMvc.perform(")
             when (httpMethod) {
-                "GET" -> append("get(\"$path\")")
-                "POST" -> append("post(\"$path\")")
-                "PUT" -> append("put(\"$path\")")
-                "DELETE" -> append("delete(\"$path\")")
-                "PATCH" -> append("patch(\"$path\")")
-                else -> append("request(HttpMethod.$httpMethod, \"$path\")")
+                "GET" -> append("get(\"$resolvedPath\")")
+                "POST" -> append("post(\"$resolvedPath\")")
+                "PUT" -> append("put(\"$resolvedPath\")")
+                "DELETE" -> append("delete(\"$resolvedPath\")")
+                "PATCH" -> append("patch(\"$resolvedPath\")")
+                else -> append("request(HttpMethod.$httpMethod, \"$resolvedPath\")")
             }
-            // 添加路径变量占位（可优化）
-            if (endpoint.pathVariables.isNotEmpty()) {
-                append(".param(\"${endpoint.pathVariables.first().name}\", \"testValue\")")
-            }
-            // 添加请求参数
-            for (param in endpoint.requestParams) {
-                append(".param(\"${param.name}\", \"testValue\")")
-            }
-            // 添加 request body（如果有）
-            if (requestBodyType != null && useAI) {
+            endpoint.requestParams
+                .filterNot { it.name in testCase.omittedRequestParameters }
+                .forEach { append(".param(\"${it.name}\", \"testValue\")") }
+            if (requestBodyType != null && testCase.scenarioType != TestScenarioType.HAPPY_PATH && testCase.requestBodyJson != null) {
+                append(".contentType(MediaType.APPLICATION_JSON).content(\"${escapeJavaString(testCase.requestBodyJson)}\")")
+            } else if (requestBodyType != null && useAI) {
                 val mockJson = aiService?.generateMockRequestBody(endpoint)
-                if (mockJson == null) {
-                    log.warn("AI request-body generation unavailable for $httpMethod $path; using fallback JSON")
-                }
-                val content = mockJson ?: "{\"field\":\"value\"}"
-                append(".contentType(MediaType.APPLICATION_JSON).content(\"$content\")")
+                if (mockJson == null) log.warn("AI request-body generation unavailable for $httpMethod $path; using fallback JSON")
+                append(".contentType(MediaType.APPLICATION_JSON).content(\"${escapeJavaString(mockJson ?: "{\"field\":\"value\"}")}\")")
+            } else if (requestBodyType != null && testCase.requestBodyJson != null) {
+                append(".contentType(MediaType.APPLICATION_JSON).content(\"${escapeJavaString(testCase.requestBodyJson)}\")")
             } else if (requestBodyType != null) {
                 append(".contentType(MediaType.APPLICATION_JSON).content(\"{}\")")
             }
             append(")")
         }
 
-        // 期望结果：状态码 200，简单断言
-        val resultActions = ".andExpect(status().isOk())"
+        val resultActions = when (testCase.expectedStatus) {
+            ExpectedHttpStatus.OK -> ".andExpect(status().isOk())"
+            ExpectedHttpStatus.BAD_REQUEST -> ".andExpect(status().isBadRequest())"
+        }
 
         return """
             @Test
-            void test${capitalizedName}() throws Exception {
-                // Generated test for endpoint: $httpMethod $path
+            void test${capitalizedName}${scenarioSuffix}() throws Exception {
+                // ${testCase.displayName}: $httpMethod $path
                 $performBlock
                     .andDo(print())
                     $resultActions;
             }
         """.trimIndent().prependIndent("    ")
     }
+
+    private fun escapeJavaString(value: String): String = value
+        .replace("\\", "\\\\")
+        .replace("\"", "\\\"")
+        .replace("\r", "\\r")
+        .replace("\n", "\\n")
 }
