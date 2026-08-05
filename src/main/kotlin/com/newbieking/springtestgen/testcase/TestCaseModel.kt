@@ -21,3 +21,12 @@ enum class ExpectedHttpStatus {
     OK,
     BAD_REQUEST
 }
+
+/** Pure scenario definition used before it is bound to PSI-derived endpoint metadata. */
+data class TestScenarioPlan(
+    val idSuffix: String,
+    val displayName: String,
+    val scenarioType: TestScenarioType,
+    val omittedRequestParameters: Set<String> = emptySet(),
+    val expectedStatus: ExpectedHttpStatus = ExpectedHttpStatus.OK
+)

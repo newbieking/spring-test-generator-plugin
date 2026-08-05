@@ -1,6 +1,7 @@
 package com.newbieking.springtestgen.testcase
 
 import com.newbieking.springtestgen.psi.EndpointMetadata
+import com.newbieking.springtestgen.psi.RequestParam
 
 /** Produces deterministic baseline cases without depending on an AI provider. */
 class DeterministicTestCaseGenerator {
@@ -9,19 +10,30 @@ class DeterministicTestCaseGenerator {
         endpoints.flatMap(::generate)
 
     fun generate(endpoint: EndpointMetadata): List<TestCaseModel> {
-        val happyPath = TestCaseModel(
-            id = "${endpoint.methodName}:happy-path",
+        return plan(endpoint.requestParams).map { plan ->
+            TestCaseModel(
+                id = "${endpoint.methodName}:${plan.idSuffix}",
+                displayName = plan.displayName,
+                endpoint = endpoint,
+                scenarioType = plan.scenarioType,
+                omittedRequestParameters = plan.omittedRequestParameters,
+                expectedStatus = plan.expectedStatus
+            )
+        }
+    }
+
+    fun plan(requestParams: List<RequestParam>): List<TestScenarioPlan> {
+        val happyPath = TestScenarioPlan(
+            idSuffix = "happy-path",
             displayName = "Happy path",
-            endpoint = endpoint,
             scenarioType = TestScenarioType.HAPPY_PATH
         )
-        val missingRequiredParameters = endpoint.requestParams
+        val missingRequiredParameters = requestParams
             .filter { it.required }
             .map { parameter ->
-                TestCaseModel(
-                    id = "${endpoint.methodName}:missing-${parameter.name}",
+                TestScenarioPlan(
+                    idSuffix = "missing-${parameter.name}",
                     displayName = "Missing required parameter '${parameter.name}'",
-                    endpoint = endpoint,
                     scenarioType = TestScenarioType.MISSING_REQUIRED_PARAMETER,
                     omittedRequestParameters = setOf(parameter.name),
                     expectedStatus = ExpectedHttpStatus.BAD_REQUEST

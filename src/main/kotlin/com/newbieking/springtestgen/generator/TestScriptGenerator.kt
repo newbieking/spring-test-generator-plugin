@@ -79,20 +79,22 @@ public class $testClassName {
         }
         val httpMethod = endpoint.httpMethod.name
         val path = endpoint.path
+        val resolvedPath = endpoint.pathVariables.fold(path) { currentPath, pathVariable ->
+            currentPath.replace("{${pathVariable.name}}", "testValue")
+        }
         val requestBodyType = endpoint.requestBodyType
         log.debug("Generating ${testCase.scenarioType} for $httpMethod $path (${endpoint.controllerName}#$methodName)")
 
         val performBlock = buildString {
             append("mockMvc.perform(")
             when (httpMethod) {
-                "GET" -> append("get(\"$path\")")
-                "POST" -> append("post(\"$path\")")
-                "PUT" -> append("put(\"$path\")")
-                "DELETE" -> append("delete(\"$path\")")
-                "PATCH" -> append("patch(\"$path\")")
-                else -> append("request(HttpMethod.$httpMethod, \"$path\")")
+                "GET" -> append("get(\"$resolvedPath\")")
+                "POST" -> append("post(\"$resolvedPath\")")
+                "PUT" -> append("put(\"$resolvedPath\")")
+                "DELETE" -> append("delete(\"$resolvedPath\")")
+                "PATCH" -> append("patch(\"$resolvedPath\")")
+                else -> append("request(HttpMethod.$httpMethod, \"$resolvedPath\")")
             }
-            endpoint.pathVariables.forEach { append(".param(\"${it.name}\", \"testValue\")") }
             endpoint.requestParams
                 .filterNot { it.name in testCase.omittedRequestParameters }
                 .forEach { append(".param(\"${it.name}\", \"testValue\")") }
