@@ -8,6 +8,7 @@ import com.intellij.psi.*
 class SpringEndpointParser(private val psiManager: PsiManager) {
 
     private val log = Logger.getInstance(SpringEndpointParser::class.java)
+    private val dtoSchemaResolver = DtoSchemaResolver(psiManager)
 
     private companion object {
         val MAPPING_ANNOTATIONS = listOf(
@@ -43,7 +44,7 @@ class SpringEndpointParser(private val psiManager: PsiManager) {
                     return@flatMap emptyList()
                 }
 
-                val requestBodyType = extractRequestBodyType(method)
+                val requestBody = extractRequestBody(method)
                 val requestParams = extractRequestParams(method)
                 val pathVariables = extractPathVariables(method)
                 classPaths.flatMap { classPath ->
@@ -57,7 +58,8 @@ class SpringEndpointParser(private val psiManager: PsiManager) {
                                 methodName = method.name,
                                 httpMethod = httpMethod,
                                 path = normalizePath("$classPath/$methodPath"),
-                                requestBodyType = requestBodyType,
+                                requestBodyType = requestBody?.type?.canonicalText,
+                                requestBodySchema = requestBody?.let { dtoSchemaResolver.resolve(it.type) },
                                 requestParams = requestParams,
                                 pathVariables = pathVariables
                             )
@@ -161,10 +163,10 @@ class SpringEndpointParser(private val psiManager: PsiManager) {
 
     private fun normalizePath(path: String): String = "/" + path.trim('/').replace(Regex("/{2,}"), "/")
 
-    private fun extractRequestBodyType(method: PsiMethod): String? =
+    private fun extractRequestBody(method: PsiMethod) =
         method.parameterList.parameters.firstOrNull {
             it.hasAnnotation("org.springframework.web.bind.annotation.RequestBody")
-        }?.type?.canonicalText
+        }
 
     private fun extractRequestParams(method: PsiMethod): List<RequestParam> =
         method.parameterList.parameters.mapNotNull { parameter ->
