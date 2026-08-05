@@ -4,6 +4,7 @@ import com.intellij.codeInsight.daemon.LineMarkerInfo
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.command.WriteCommandAction
@@ -31,6 +32,8 @@ import org.jetbrains.kotlin.psi.KtNamedFunction
 class GenerateTestForMethodAction : AnAction() {
 
     private val log = Logger.getInstance(GenerateTestForMethodAction::class.java)
+
+    override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
 
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
@@ -115,7 +118,7 @@ class GenerateTestForMethodAction : AnAction() {
                     log.info("Test source generated for ${targetEndpoint.httpMethod} ${targetEndpoint.path}")
                     ApplicationManager.getApplication().invokeLater {
                         WriteCommandAction.runWriteCommandAction(project) {
-                            writeTestFile(project, dialog.getTestClassName(), testClass)
+                            writeTestFile(project, dialog.getTestClassName(), testPackageName(targetEndpoint), testClass)
                         }
                     }
                 }
@@ -129,6 +132,7 @@ class GenerateTestForMethodAction : AnAction() {
     private fun writeTestFile(
         project: Project,
         testClassName: String,
+        testPackageName: String,
         content: String
     ) {
         val baseDir = project.baseDir
@@ -136,13 +140,16 @@ class GenerateTestForMethodAction : AnAction() {
         if (testSrcDir != null) {
             val psiDir = PsiManager.getInstance(project).findDirectory(testSrcDir)
             if (psiDir != null) {
+                val packageDir = testPackageName.split('.').filter(String::isNotBlank).fold(psiDir) { directory, segment ->
+                    directory.findSubdirectory(segment) ?: directory.createSubdirectory(segment)
+                }
                 val fileName = "$testClassName.java"
-                val existingFile = psiDir.findFile(fileName)
+                val existingFile = packageDir.findFile(fileName)
                 if (existingFile != null) {
                     PsiUtils.setContent(existingFile, content)
                     log.info("Updated generated test file: ${existingFile.virtualFile.path}")
                 } else {
-                    psiDir.createFile(fileName).let {
+                    packageDir.createFile(fileName).let {
                         PsiUtils.setContent(it, content)
                         log.info("Created generated test file: ${it.virtualFile.path}")
                     }
@@ -156,6 +163,11 @@ class GenerateTestForMethodAction : AnAction() {
                 "Spring Test Generator"
             )
         }
+    }
+
+    private fun testPackageName(endpoint: com.newbieking.springtestgen.psi.EndpointMetadata): String {
+        val controllerPackage = endpoint.controllerQualifiedName?.substringBeforeLast('.', "") ?: ""
+        return if (controllerPackage.isBlank()) "test" else "$controllerPackage.test"
     }
 
     // ----------------- Gutter 图标提供者 -----------------

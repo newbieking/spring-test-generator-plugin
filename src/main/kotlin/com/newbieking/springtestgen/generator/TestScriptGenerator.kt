@@ -32,21 +32,26 @@ class TestScriptGenerator(private val project: Project) {
         useAI: Boolean
     ): String {
         require(endpoints.isNotEmpty()) { "At least one endpoint is required to generate a test class." }
-        val controllerName = endpoints.first().controllerClass.name
-        val packageName = endpoints.first().controllerClass.qualifiedName
+        val controllerName = endpoints.first().controllerName
+        val controllerQualifiedName = endpoints.first().controllerQualifiedName
+        val controllerPackageName = controllerQualifiedName
             ?.substringBeforeLast('.') ?: ""
+        val testPackageName = if (controllerPackageName.isBlank()) "test" else "$controllerPackageName.test"
 
         val imports = buildString {
+            if (controllerQualifiedName != null) {
+                appendLine("import $controllerQualifiedName;")
+            }
+            appendLine()
             appendLine("import org.junit.jupiter.api.Test;")
             appendLine("import org.springframework.beans.factory.annotation.Autowired;")
             appendLine("import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;")
-            appendLine("import org.springframework.test.web.servlet.MockMvc;")
             appendLine("import org.springframework.http.MediaType;")
+            appendLine("import org.springframework.test.web.servlet.MockMvc;")
+            appendLine()
             appendLine("import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;")
             appendLine("import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;")
-            if (endpoints.any { it.requestBodyType != null }) {
-                appendLine("import com.fasterxml.jackson.databind.ObjectMapper;")
-            }
+            appendLine("import static org.springframework.test.web.servlet.result.MockMvcResultHandlers.*;")
         }
 
         log.info("Generating test class '$testClassName' for ${endpoints.size} endpoint(s); AI enabled: $useAI")
@@ -55,7 +60,7 @@ class TestScriptGenerator(private val project: Project) {
         }.joinToString("\n\n")
 
         val generatedClass = """
-package ${packageName}test;
+package $testPackageName;
 
 $imports
 
@@ -65,8 +70,6 @@ public class $testClassName {
     @Autowired
     private MockMvc mockMvc;
 
-    ${if (endpoints.any { it.requestBodyType != null }) "@Autowired private ObjectMapper objectMapper;" else ""}
-
     $methods
 }
         """.trimIndent()
@@ -75,12 +78,12 @@ public class $testClassName {
     }
 
     private suspend fun generateTestMethod(endpoint: EndpointMetadata, useAI: Boolean): String {
-        val methodName = endpoint.method.name
+        val methodName = endpoint.methodName
         val capitalizedName = methodName.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
         val httpMethod = endpoint.httpMethod.name
         val path = endpoint.path
         val requestBodyType = endpoint.requestBodyType
-        log.debug("Generating test method for $httpMethod $path (${endpoint.controllerClass.name}#$methodName), request body: ${requestBodyType != null}")
+        log.debug("Generating test method for $httpMethod $path (${endpoint.controllerName}#$methodName), request body: ${requestBodyType != null}")
 
         // 构建 MockMvc 请求
         val performBlock = buildString {
@@ -119,13 +122,13 @@ public class $testClassName {
         val resultActions = ".andExpect(status().isOk())"
 
         return """
-    @Test
-    void test${capitalizedName}() throws Exception {
-        // Generated test for endpoint: $httpMethod $path
-        $performBlock
-            .andDo(print())
-            $resultActions;
-    }
-        """.trimIndent()
+            @Test
+            void test${capitalizedName}() throws Exception {
+                // Generated test for endpoint: $httpMethod $path
+                $performBlock
+                    .andDo(print())
+                    $resultActions;
+            }
+        """.trimIndent().prependIndent("    ")
     }
 }

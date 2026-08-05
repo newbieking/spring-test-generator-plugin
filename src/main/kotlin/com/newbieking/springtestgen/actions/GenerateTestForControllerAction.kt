@@ -2,6 +2,7 @@ package com.newbieking.springtestgen.actions
 
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.command.WriteCommandAction
@@ -26,6 +27,8 @@ import kotlinx.coroutines.runBlocking
 class GenerateTestForControllerAction : AnAction() {
 
     private val log = Logger.getInstance(GenerateTestForControllerAction::class.java)
+
+    override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
 
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
@@ -61,7 +64,7 @@ class GenerateTestForControllerAction : AnAction() {
                     log.info("Test source generated for ${endpoints.size} endpoint(s)")
                     ApplicationManager.getApplication().invokeLater {
                         WriteCommandAction.runWriteCommandAction(project) {
-                            writeTestFile(project, dialog.getTestClassName(), testClass)
+                            writeTestFile(project, dialog.getTestClassName(), testPackageName(endpoints.first()), testClass)
                         }
                     }
                 }
@@ -93,6 +96,7 @@ class GenerateTestForControllerAction : AnAction() {
     private fun writeTestFile(
         project: Project,
         testClassName: String,
+        testPackageName: String,
         content: String
     ) {
         val baseDir = project.baseDir
@@ -100,13 +104,16 @@ class GenerateTestForControllerAction : AnAction() {
         if (testSrcDir != null) {
             val psiDir = PsiManager.getInstance(project).findDirectory(testSrcDir)
             if (psiDir != null) {
+                val packageDir = testPackageName.split('.').filter(String::isNotBlank).fold(psiDir) { directory, segment ->
+                    directory.findSubdirectory(segment) ?: directory.createSubdirectory(segment)
+                }
                 val fileName = "$testClassName.java"
-                val existingFile = psiDir.findFile(fileName)
+                val existingFile = packageDir.findFile(fileName)
                 if (existingFile != null) {
                     PsiUtils.setContent(existingFile, content)
                     log.info("Updated generated test file: ${existingFile.virtualFile.path}")
                 } else {
-                    psiDir.createFile(fileName).let {
+                    packageDir.createFile(fileName).let {
                         PsiUtils.setContent(it, content)
                         log.info("Created generated test file: ${it.virtualFile.path}")
                     }
@@ -120,5 +127,10 @@ class GenerateTestForControllerAction : AnAction() {
                 "Spring Test Generator"
             )
         }
+    }
+
+    private fun testPackageName(endpoint: com.newbieking.springtestgen.psi.EndpointMetadata): String {
+        val controllerPackage = endpoint.controllerQualifiedName?.substringBeforeLast('.', "") ?: ""
+        return if (controllerPackage.isBlank()) "test" else "$controllerPackage.test"
     }
 }

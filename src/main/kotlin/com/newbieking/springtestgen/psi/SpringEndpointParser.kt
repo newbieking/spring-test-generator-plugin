@@ -1,12 +1,11 @@
 package com.newbieking.springtestgen.psi
 
 import com.intellij.openapi.diagnostic.Logger
+import com.intellij.openapi.application.ReadAction
 import com.intellij.psi.*
 
-/**
- * PSI 解析器，提取 Spring Web 端点信息
- */
-class SpringEndpointParser(private val project: PsiManager) {
+/** Extracts Spring MVC endpoint metadata from Java PSI. */
+class SpringEndpointParser(private val psiManager: PsiManager) {
 
     private val log = Logger.getInstance(SpringEndpointParser::class.java)
 
@@ -21,166 +20,176 @@ class SpringEndpointParser(private val project: PsiManager) {
         )
     }
 
-    /**
-     * 扫描当前类中所有符合端点条件的方法
-     */
-    fun parseController(psiClass: PsiClass): List<EndpointMetadata> {
+    fun parseController(psiClass: PsiClass): List<EndpointMetadata> =
+        ReadAction.compute<List<EndpointMetadata>, RuntimeException> {
+            parseControllerInReadAction(psiClass)
+        }
+
+    private fun parseControllerInReadAction(psiClass: PsiClass): List<EndpointMetadata> {
         val controllerName = psiClass.qualifiedName ?: psiClass.name ?: "<anonymous>"
         if (!isController(psiClass)) {
             log.debug("Skipping non-controller class: $controllerName")
             return emptyList()
         }
-        val classPath = getClassRequestMapping(psiClass)
-        log.debug("Parsing Spring controller: $controllerName (base path: '$classPath')")
+
+        val classPaths = getClassRequestMappings(psiClass)
         val endpoints = psiClass.allMethods
-            .filter { isHandlerMethod(it) }
-            .mapNotNull { method ->
-                val methodPath = getMethodRequestMapping(method) ?: return@mapNotNull null
-                val httpMethod = resolveHttpMethod(method) ?: return@mapNotNull null
-                val fullPath = normalizePath(classPath + methodPath)
-                val bodyParam = extractRequestBodyType(method)
-                val params = extractRequestParams(method)
-                val pathVars = extractPathVariables(method)
-                EndpointMetadata(
-                    controllerClass = psiClass,
-                    method = method,
-                    httpMethod = httpMethod,
-                    path = fullPath,
-                    requestBodyType = bodyParam,
-                    requestParams = params,
-                    pathVariables = pathVars
-                )
+            .filter(::isHandlerMethodInReadAction)
+            .flatMap { method ->
+                val methodPaths = getMethodRequestMappings(method) ?: return@flatMap emptyList()
+                val httpMethods = resolveHttpMethods(method)
+                if (methodPaths.isEmpty() || httpMethods.isEmpty()) {
+                    log.warn("Skipping unsupported mapping on method: $controllerName#${method.name}")
+                    return@flatMap emptyList()
+                }
+
+                val requestBodyType = extractRequestBodyType(method)
+                val requestParams = extractRequestParams(method)
+                val pathVariables = extractPathVariables(method)
+                classPaths.flatMap { classPath ->
+                    methodPaths.flatMap { methodPath ->
+                        httpMethods.map { httpMethod ->
+                            EndpointMetadata(
+                                controllerClass = psiClass,
+                                method = method,
+                                controllerName = psiClass.name ?: "Controller",
+                                controllerQualifiedName = psiClass.qualifiedName,
+                                methodName = method.name,
+                                httpMethod = httpMethod,
+                                path = normalizePath("$classPath/$methodPath"),
+                                requestBodyType = requestBodyType,
+                                requestParams = requestParams,
+                                pathVariables = pathVariables
+                            )
+                        }
+                    }
+                }
             }
+
         log.debug("Parsed ${endpoints.size} endpoint(s) from controller: $controllerName")
         return endpoints
     }
 
+    fun isHandlerMethod(method: PsiMethod): Boolean = ReadAction.compute<Boolean, RuntimeException> {
+        isHandlerMethodInReadAction(method)
+    }
+
+    private fun isHandlerMethodInReadAction(method: PsiMethod): Boolean =
+        MAPPING_ANNOTATIONS.any { method.getAnnotation(it) != null }
+
+    private fun isController(clazz: PsiClass): Boolean =
+        clazz.getAnnotation("org.springframework.web.bind.annotation.RestController") != null ||
+            clazz.getAnnotation("org.springframework.stereotype.Controller") != null
+
+    private fun getClassRequestMappings(clazz: PsiClass): List<String> =
+        clazz.getAnnotation("org.springframework.web.bind.annotation.RequestMapping")
+            ?.let(::extractPaths)
+            ?: listOf("")
+
     /**
-     * 判断指定方法是否为请求处理方法（拥有 @RequestMapping 或其快捷注解）
+     * A mapping annotation without `path` or `value` is valid Spring MVC and maps to
+     * the controller base path, so it returns a single empty path rather than null.
      */
-    fun isHandlerMethod(method: PsiMethod): Boolean {
-        return MAPPING_ANNOTATIONS.any { method.getAnnotation(it) != null }
+    private fun getMethodRequestMappings(method: PsiMethod): List<String>? {
+        val annotation = MAPPING_ANNOTATIONS.firstNotNullOfOrNull { method.getAnnotation(it) }
+            ?: return null
+        return extractPaths(annotation)
     }
 
-    // ---------- 私有辅助方法 ----------
-
-    private fun isController(clazz: PsiClass): Boolean {
-        return clazz.hasAnnotation("org.springframework.web.bind.annotation.RestController") ||
-                clazz.hasAnnotation("org.springframework.stereotype.Controller")
-    }
-
-    private fun getClassRequestMapping(clazz: PsiClass): String {
-        val anno = clazz.getAnnotation("org.springframework.web.bind.annotation.RequestMapping")
-        val value = anno?.findAttributeValue("value") ?: anno?.findAttributeValue("path")
-        return extractPathFromAnnotationValue(value) ?: ""
-    }
-
-    private fun getMethodRequestMapping(method: PsiMethod): String? {
-        for (annoName in MAPPING_ANNOTATIONS) {
-            val anno = method.getAnnotation(annoName)
-            if (anno != null) {
-                val value = anno.findAttributeValue("value") ?: anno.findAttributeValue("path")
-                return extractPathFromAnnotationValue(value)
+    private fun resolveHttpMethods(method: PsiMethod): List<HttpMethod> = when {
+        method.hasAnnotation("org.springframework.web.bind.annotation.GetMapping") -> listOf(HttpMethod.GET)
+        method.hasAnnotation("org.springframework.web.bind.annotation.PostMapping") -> listOf(HttpMethod.POST)
+        method.hasAnnotation("org.springframework.web.bind.annotation.PutMapping") -> listOf(HttpMethod.PUT)
+        method.hasAnnotation("org.springframework.web.bind.annotation.DeleteMapping") -> listOf(HttpMethod.DELETE)
+        method.hasAnnotation("org.springframework.web.bind.annotation.PatchMapping") -> listOf(HttpMethod.PATCH)
+        method.hasAnnotation("org.springframework.web.bind.annotation.RequestMapping") -> {
+            val annotation = method.getAnnotation("org.springframework.web.bind.annotation.RequestMapping")
+            val methodAttribute = annotation?.findDeclaredAttributeValue("method")
+            if (methodAttribute == null) {
+                log.debug("@RequestMapping without method on ${method.name}; using GET as the generated-test default")
+                listOf(HttpMethod.GET)
+            } else {
+                annotationValues(methodAttribute).mapNotNull(::toHttpMethod)
             }
         }
-        return null
+        else -> emptyList()
     }
 
-    private fun resolveHttpMethod(method: PsiMethod): HttpMethod? {
-        return when {
-            method.hasAnnotation("org.springframework.web.bind.annotation.GetMapping") -> HttpMethod.GET
-            method.hasAnnotation("org.springframework.web.bind.annotation.PostMapping") -> HttpMethod.POST
-            method.hasAnnotation("org.springframework.web.bind.annotation.PutMapping") -> HttpMethod.PUT
-            method.hasAnnotation("org.springframework.web.bind.annotation.DeleteMapping") -> HttpMethod.DELETE
-            method.hasAnnotation("org.springframework.web.bind.annotation.PatchMapping") -> HttpMethod.PATCH
-            method.hasAnnotation("org.springframework.web.bind.annotation.RequestMapping") -> {
-                val anno = method.getAnnotation("org.springframework.web.bind.annotation.RequestMapping")
-                val methodAttr = anno?.findAttributeValue("method")
-                when {
-                    methodAttr is PsiArrayInitializerMemberValue -> {
-                        methodAttr.initializers?.firstOrNull()?.text?.let {
-                            when (it.trim('"')) {
-                                "RequestMethod.GET" -> HttpMethod.GET
-                                "RequestMethod.POST" -> HttpMethod.POST
-                                "RequestMethod.PUT" -> HttpMethod.PUT
-                                "RequestMethod.DELETE" -> HttpMethod.DELETE
-                                "RequestMethod.PATCH" -> HttpMethod.PATCH
-                                else -> null
-                            }
-                        }
-                    }
-                    // method 未指定则默认 GET
-                    methodAttr == null -> HttpMethod.GET
-                    else -> null
-                }
-            }
-            else -> null
+    private fun extractPaths(annotation: PsiAnnotation): List<String> {
+        // findAttributeValue() returns annotation defaults, which are an empty array ({})
+        // for Spring mapping paths. Only source-declared values distinguish an omitted path.
+        val pathValue = annotation.findDeclaredAttributeValue("path")
+            ?: annotation.findDeclaredAttributeValue("value")
+            ?: return listOf("")
+        val paths = annotationValues(pathValue).mapNotNull(::resolveStringValue)
+        if (paths.isEmpty() && pathValue is PsiArrayInitializerMemberValue && pathValue.initializers.isEmpty()) {
+            return listOf("")
         }
-    }
-
-    private fun extractPathFromAnnotationValue(value: PsiAnnotationMemberValue?): String? {
-        if (value is PsiLiteralExpression) {
-            return value.text?.trim('"')
-        } else if (value is PsiArrayInitializerMemberValue) {
-            return value.initializers?.firstOrNull()?.text?.trim('"')
+        if (paths.isEmpty()) {
+            log.warn("Unable to resolve path expression '${pathValue.text}' on ${annotation.qualifiedName}")
         }
-        return null
+        return paths
     }
 
-    private fun normalizePath(path: String): String {
-        return "/" + path.trim('/')
+    private fun annotationValues(value: PsiAnnotationMemberValue): List<PsiAnnotationMemberValue> =
+        if (value is PsiArrayInitializerMemberValue) value.initializers.toList() else listOf(value)
+
+    private fun resolveStringValue(value: PsiAnnotationMemberValue?): String? {
+        val expression = value as? PsiExpression ?: return null
+        return JavaPsiFacade.getInstance(psiManager.project)
+            .constantEvaluationHelper
+            .computeConstantExpression(expression) as? String
     }
 
-    private fun extractRequestBodyType(method: PsiMethod): String? {
-        for (param in method.parameterList.parameters) {
-            if (param.hasAnnotation("org.springframework.web.bind.annotation.RequestBody")) {
-                return param.type.canonicalText
-            }
+    private fun resolveBooleanValue(value: PsiAnnotationMemberValue?): Boolean? {
+        val expression = value as? PsiExpression ?: return null
+        return JavaPsiFacade.getInstance(psiManager.project)
+            .constantEvaluationHelper
+            .computeConstantExpression(expression) as? Boolean
+    }
+
+    private fun toHttpMethod(value: PsiAnnotationMemberValue): HttpMethod? = when (
+        value.text.substringAfterLast('.').trim()
+    ) {
+        "GET" -> HttpMethod.GET
+        "POST" -> HttpMethod.POST
+        "PUT" -> HttpMethod.PUT
+        "DELETE" -> HttpMethod.DELETE
+        "PATCH" -> HttpMethod.PATCH
+        else -> null
+    }
+
+    private fun normalizePath(path: String): String = "/" + path.trim('/').replace(Regex("/{2,}"), "/")
+
+    private fun extractRequestBodyType(method: PsiMethod): String? =
+        method.parameterList.parameters.firstOrNull {
+            it.hasAnnotation("org.springframework.web.bind.annotation.RequestBody")
+        }?.type?.canonicalText
+
+    private fun extractRequestParams(method: PsiMethod): List<RequestParam> =
+        method.parameterList.parameters.mapNotNull { parameter ->
+            val annotation = parameter.getAnnotation("org.springframework.web.bind.annotation.RequestParam")
+                ?: return@mapNotNull null
+            val name = annotationName(annotation) ?: parameter.name
+            val required = resolveBooleanValue(annotation.findAttributeValue("required")) ?: true
+            RequestParam(name, parameter.type.canonicalText, required)
         }
-        return null
-    }
 
-    private fun extractRequestParams(method: PsiMethod): List<RequestParam> {
-        log.debug("extractRequestParams: ${method.parameterList.parameters.toList()}")
-        val result = mutableListOf<RequestParam>()
-        for (param in method.parameterList.parameters) {
-            val anno = param.getAnnotation("org.springframework.web.bind.annotation.RequestParam")
-            if (anno != null) {
-                val name = (anno.findAttributeValue("value") as? PsiLiteralExpression)?.text?.trim('"')
-                    ?: param.name ?: "unnamed"
-                val required = (anno.findAttributeValue("required") as? PsiLiteralExpression)?.text?.toBoolean() ?: true
-                result.add(RequestParam(name, param.type.canonicalText, required))
-            }
+    private fun extractPathVariables(method: PsiMethod): List<PathVariable> =
+        method.parameterList.parameters.mapNotNull { parameter ->
+            val annotation = parameter.getAnnotation("org.springframework.web.bind.annotation.PathVariable")
+                ?: return@mapNotNull null
+            val name = annotationName(annotation) ?: parameter.name
+            PathVariable(name, parameter.type.canonicalText)
         }
-        if (result.isNotEmpty()) {
-            log.debug("Extracted ${result.size} request parameter(s) from method: ${method.name}")
-        }
-        return result
-    }
 
-    private fun extractPathVariables(method: PsiMethod): List<PathVariable> {
-        val result = mutableListOf<PathVariable>()
-        for (param in method.parameterList.parameters) {
-            val anno = param.getAnnotation("org.springframework.web.bind.annotation.PathVariable")
-            if (anno != null) {
-                val name = (anno.findAttributeValue("value") as? PsiLiteralExpression)?.text?.trim('"')
-                    ?: param.name ?: "unnamed"
-                result.add(PathVariable(name, param.type.canonicalText))
-            }
-        }
-        return result
-    }
-
-    // 扩展函数：检查方法是否有某个注解
-    private fun PsiMethod.hasAnnotation(fqn: String): Boolean {
-        return getAnnotation(fqn) != null
-    }
-
-    private fun PsiClass.hasAnnotation(fqn: String): Boolean {
-        return getAnnotation(fqn) != null
-    }
-
-    private fun PsiParameter.hasAnnotation(fqn: String): Boolean {
-        return getAnnotation(fqn) != null
-    }
+    /**
+     * Spring's name/value attributes default to an empty string. Read only values
+     * declared in source, then use the Java parameter name when the annotation is blank.
+     */
+    private fun annotationName(annotation: PsiAnnotation): String? =
+        resolveStringValue(
+            annotation.findDeclaredAttributeValue("name")
+                ?: annotation.findDeclaredAttributeValue("value")
+        )?.takeIf { it.isNotBlank() }
 }

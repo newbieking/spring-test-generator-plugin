@@ -1,19 +1,23 @@
 package com.newbieking.springtestgen.psi
 
-import com.intellij.psi.PsiMethod
 import com.intellij.psi.PsiClass
+import com.intellij.psi.PsiMethod
 
 /**
- * 端点元数据，包含生成测试所需全部信息
+ * Endpoint data extracted from PSI. The string fields are snapshots that remain
+ * safe to consume after the read action which produced this metadata has ended.
  */
 data class EndpointMetadata(
-    val controllerClass: PsiClass,          // 所属 Controller 类
-    val method: PsiMethod,                  // 处理方法
-    val httpMethod: HttpMethod,            // GET/POST/PUT/DELETE
-    val path: String,                       // 完整路径（类级 + 方法级）
-    val requestBodyType: String?,           // @RequestBody 的类型全限定名（可能为 null）
-    val requestParams: List<RequestParam>,  // @RequestParam 列表
-    val pathVariables: List<PathVariable>   // @PathVariable 列表
+    val controllerClass: PsiClass,
+    val method: PsiMethod,
+    val controllerName: String,
+    val controllerQualifiedName: String?,
+    val methodName: String,
+    val httpMethod: HttpMethod,
+    val path: String,
+    val requestBodyType: String?,
+    val requestParams: List<RequestParam>,
+    val pathVariables: List<PathVariable>
 )
 
 enum class HttpMethod { GET, POST, PUT, DELETE, PATCH }
