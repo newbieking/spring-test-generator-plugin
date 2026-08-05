@@ -17,6 +17,7 @@ data class EndpointMetadata(
     val path: String,
     val requestBodyType: String?,
     val requestBodySchema: RequestBodySchema?,
+    val requestBodyValidated: Boolean,
     val requestParams: List<RequestParam>,
     val pathVariables: List<PathVariable>
 )

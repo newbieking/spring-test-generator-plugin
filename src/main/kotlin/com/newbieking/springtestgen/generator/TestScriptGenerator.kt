@@ -9,6 +9,7 @@ import com.newbieking.springtestgen.services.SettingsService
 import com.newbieking.springtestgen.testcase.DeterministicTestCaseGenerator
 import com.newbieking.springtestgen.testcase.ExpectedHttpStatus
 import com.newbieking.springtestgen.testcase.TestCaseModel
+import com.newbieking.springtestgen.testcase.TestScenarioType
 
 /** Generates JUnit 5 and MockMvc tests from deterministic test-case models. */
 class TestScriptGenerator(private val project: Project) {
@@ -98,10 +99,14 @@ public class $testClassName {
             endpoint.requestParams
                 .filterNot { it.name in testCase.omittedRequestParameters }
                 .forEach { append(".param(\"${it.name}\", \"testValue\")") }
-            if (requestBodyType != null && useAI) {
+            if (requestBodyType != null && testCase.scenarioType != TestScenarioType.HAPPY_PATH && testCase.requestBodyJson != null) {
+                append(".contentType(MediaType.APPLICATION_JSON).content(\"${escapeJavaString(testCase.requestBodyJson)}\")")
+            } else if (requestBodyType != null && useAI) {
                 val mockJson = aiService?.generateMockRequestBody(endpoint)
                 if (mockJson == null) log.warn("AI request-body generation unavailable for $httpMethod $path; using fallback JSON")
                 append(".contentType(MediaType.APPLICATION_JSON).content(\"${escapeJavaString(mockJson ?: "{\"field\":\"value\"}")}\")")
+            } else if (requestBodyType != null && testCase.requestBodyJson != null) {
+                append(".contentType(MediaType.APPLICATION_JSON).content(\"${escapeJavaString(testCase.requestBodyJson)}\")")
             } else if (requestBodyType != null) {
                 append(".contentType(MediaType.APPLICATION_JSON).content(\"{}\")")
             }

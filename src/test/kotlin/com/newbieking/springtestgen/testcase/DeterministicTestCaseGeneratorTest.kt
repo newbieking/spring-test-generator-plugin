@@ -1,6 +1,9 @@
 package com.newbieking.springtestgen.testcase
 
 import com.newbieking.springtestgen.psi.RequestParam
+import com.newbieking.springtestgen.psi.RequestBodySchema
+import com.newbieking.springtestgen.psi.RequestFieldSchema
+import com.newbieking.springtestgen.psi.ValidationConstraints
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -34,5 +37,40 @@ class DeterministicTestCaseGeneratorTest {
 
         assertEquals(1, plans.size)
         assertEquals("happy-path", plans.single().idSuffix)
+    }
+
+    @Test
+    fun `creates null blank length and numeric boundary body cases for validated dto`() {
+        val schema = RequestBodySchema(
+            typeName = "CreateOrderRequest",
+            qualifiedName = "example.CreateOrderRequest",
+            fields = listOf(
+                RequestFieldSchema(
+                    name = "username",
+                    type = "java.lang.String",
+                    constraints = ValidationConstraints(
+                        required = true,
+                        notBlank = true,
+                        minLength = 3,
+                        maxLength = 5
+                    )
+                ),
+                RequestFieldSchema(
+                    name = "amount",
+                    type = "int",
+                    constraints = ValidationConstraints(minimum = "18", maximum = "60")
+                )
+            )
+        )
+
+        val plans = generator.plan(emptyList(), schema, bodyValidated = true)
+
+        assertTrue(plans.any { it.scenarioType == TestScenarioType.MISSING_REQUIRED_BODY_FIELD && !it.requestBodyJson.orEmpty().contains("username") })
+        assertTrue(plans.any { it.scenarioType == TestScenarioType.NULL_REQUIRED_BODY_FIELD && it.requestBodyJson.orEmpty().contains("\"username\":null") })
+        assertTrue(plans.any { it.scenarioType == TestScenarioType.BLANK_BODY_FIELD && it.requestBodyJson.orEmpty().contains("\"username\":\"\"") })
+        assertTrue(plans.any { it.scenarioType == TestScenarioType.BODY_FIELD_TOO_SHORT && it.requestBodyJson.orEmpty().contains("\"aa\"") })
+        assertTrue(plans.any { it.scenarioType == TestScenarioType.BODY_FIELD_TOO_LONG && it.requestBodyJson.orEmpty().contains("\"aaaaaa\"") })
+        assertTrue(plans.any { it.scenarioType == TestScenarioType.BODY_FIELD_BELOW_MINIMUM && it.requestBodyJson.orEmpty().contains("\"amount\":17") })
+        assertTrue(plans.any { it.scenarioType == TestScenarioType.BODY_FIELD_ABOVE_MAXIMUM && it.requestBodyJson.orEmpty().contains("\"amount\":61") })
     }
 }

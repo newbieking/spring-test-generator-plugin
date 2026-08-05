@@ -60,6 +60,9 @@ class SpringEndpointParser(private val psiManager: PsiManager) {
                                 path = normalizePath("$classPath/$methodPath"),
                                 requestBodyType = requestBody?.type?.canonicalText,
                                 requestBodySchema = requestBody?.let { dtoSchemaResolver.resolve(it.type) },
+                                requestBodyValidated = requestBody?.hasAnnotation("jakarta.validation.Valid") == true ||
+                                    requestBody?.hasAnnotation("javax.validation.Valid") == true ||
+                                    requestBody?.hasAnnotation("org.springframework.validation.annotation.Validated") == true,
                                 requestParams = requestParams,
                                 pathVariables = pathVariables
                             )
