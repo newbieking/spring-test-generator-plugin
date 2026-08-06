@@ -4,6 +4,8 @@ import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import com.intellij.openapi.diagnostic.Logger
+import com.intellij.openapi.project.Project
+import com.newbieking.springtestgen.prompt.PromptTemplateService
 import com.newbieking.springtestgen.psi.EndpointMetadata
 import kotlinx.coroutines.*
 import java.net.http.HttpClient
@@ -12,9 +14,18 @@ import java.net.http.HttpResponse
 import java.time.Duration
 
 /**
- * OpenAI 兼容 API 客户端，实现 AI 生成功能
+ * OpenAI-compatible API client that implements AI generation via prompt templates.
+ *
+ * All prompt text is resolved through [PromptTemplateService], making prompts
+ * configurable and centralised. If a template is missing, the client falls back
+ * to a minimal hardcoded prompt and logs a warning.
  */
-class OpenAIApiClient(private val settings: SettingsService) : AIGenerationService {
+class OpenAIApiClient(
+    private val project: Project,
+    private val promptService: PromptTemplateService = PromptTemplateService()
+) : AIGenerationService {
+
+    private val settings: SettingsService by lazy { SettingsService.getInstance(project) }
 
     private val client = HttpClient.newBuilder()
         .connectTimeout(Duration.ofSeconds(10))
@@ -24,22 +35,28 @@ class OpenAIApiClient(private val settings: SettingsService) : AIGenerationServi
 
     override suspend fun generateMockRequestBody(metadata: EndpointMetadata): String? {
         val bodyType = metadata.requestBodyType ?: return null
-        val prompt = """
-            You are a test data generator. Given a Java/Kotlin class type: $bodyType
-            Generate a realistic JSON object that could be used as a request body for a Spring Boot controller.
-            The JSON should have meaningful field names and values. Only output the JSON, no other text, no markdown fences.
-            Example: {"id":1, "name":"John Doe", "email":"john@example.com"}
-        """.trimIndent()
-
-        return callAI(prompt)
+        val resolved = promptService.resolve(
+            PromptTemplateService.CONTROLLER_MOCK_REQUEST_BODY,
+            mapOf("bodyType" to bodyType)
+        )
+        if (resolved.unresolvedVariables.isNotEmpty()) {
+            log.info("Mock request body template has unresolved variables: ${resolved.unresolvedVariables}")
+        }
+        return callAI(resolved.text)
     }
 
     override suspend fun generateExpectedResponse(metadata: EndpointMetadata): String? {
-        val prompt = """
-            Generate a JSON object that represents a typical success response for a ${metadata.httpMethod} request to ${metadata.path}.
-            Only output the JSON, no other text, no markdown fences.
-        """.trimIndent()
-        return callAI(prompt)
+        val resolved = promptService.resolve(
+            PromptTemplateService.CONTROLLER_EXPECTED_RESPONSE,
+            mapOf(
+                "httpMethod" to metadata.httpMethod.name,
+                "path" to metadata.path
+            )
+        )
+        if (resolved.unresolvedVariables.isNotEmpty()) {
+            log.info("Expected response template has unresolved variables: ${resolved.unresolvedVariables}")
+        }
+        return callAI(resolved.text)
     }
 
     private suspend fun callAI(prompt: String): String? {
@@ -48,7 +65,7 @@ class OpenAIApiClient(private val settings: SettingsService) : AIGenerationServi
                 val config = settings.getConfig()
                 log.info("Sending AI generation request (model: ${config.model}, endpoint: ${config.baseUrl.trimEnd('/')}/chat/completions)")
 
-                // 构建 messages JSON 数组
+                // Build messages JSON array
                 val messagesArray = JsonArray().apply {
                     val userMessage = JsonObject().apply {
                         addProperty("role", "user")
