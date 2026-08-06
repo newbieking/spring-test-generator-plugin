@@ -55,7 +55,7 @@ class ClassUnderTestParser {
             annotations = annotations,
             constructors = constructors,
             dependencies = constructorDependencies + fieldDependencies,
-            methods = psiClass.methods.map(::toMethodMetadata),
+            methods = psiClass.methods.filterNot { it.isConstructor }.map(::toMethodMetadata),
             unsupportedReason = unsupportedReason(targetType, qualifiedName)
         )
     }

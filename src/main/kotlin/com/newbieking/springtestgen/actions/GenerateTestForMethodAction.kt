@@ -22,7 +22,7 @@ import com.intellij.psi.util.PsiTreeUtil
 import com.newbieking.springtestgen.generator.TestScriptGenerator
 import com.newbieking.springtestgen.psi.SpringEndpointParser
 import com.newbieking.springtestgen.ui.GenerateTestDialog
-import com.newbieking.springtestgen.utils.PsiUtils
+import com.newbieking.springtestgen.utils.TestFileWriter
 import kotlinx.coroutines.runBlocking
 import org.jetbrains.kotlin.psi.KtNamedFunction
 
@@ -118,56 +118,17 @@ class GenerateTestForMethodAction : AnAction() {
                     log.info("Test source generated for ${targetEndpoint.httpMethod} ${targetEndpoint.path}")
                     ApplicationManager.getApplication().invokeLater {
                         WriteCommandAction.runWriteCommandAction(project) {
-                            writeTestFile(project, dialog.getTestClassName(), testPackageName(targetEndpoint), testClass)
+                            TestFileWriter.writeTestFile(
+                                project,
+                                dialog.getTestClassName(),
+                                TestFileWriter.deriveTestPackageName(targetEndpoint.controllerQualifiedName),
+                                testClass
+                            )
                         }
                     }
                 }
             })
         }
-    }
-
-    /**
-     * 将生成的测试类写入 src/test/java 目录
-     */
-    private fun writeTestFile(
-        project: Project,
-        testClassName: String,
-        testPackageName: String,
-        content: String
-    ) {
-        val baseDir = project.baseDir
-        val testSrcDir = baseDir.findChild("src")?.findChild("test")?.findChild("java")
-        if (testSrcDir != null) {
-            val psiDir = PsiManager.getInstance(project).findDirectory(testSrcDir)
-            if (psiDir != null) {
-                val packageDir = testPackageName.split('.').filter(String::isNotBlank).fold(psiDir) { directory, segment ->
-                    directory.findSubdirectory(segment) ?: directory.createSubdirectory(segment)
-                }
-                val fileName = "$testClassName.java"
-                val existingFile = packageDir.findFile(fileName)
-                if (existingFile != null) {
-                    PsiUtils.setContent(existingFile, content)
-                    log.info("Updated generated test file: ${existingFile.virtualFile.path}")
-                } else {
-                    packageDir.createFile(fileName).let {
-                        PsiUtils.setContent(it, content)
-                        log.info("Created generated test file: ${it.virtualFile.path}")
-                    }
-                }
-            }
-        } else {
-            log.warn("Unable to write generated test '$testClassName': src/test/java directory not found in ${project.basePath}")
-            Messages.showWarningDialog(
-                project,
-                "Could not find src/test/java directory. Please ensure your project has a standard Maven/Gradle layout.",
-                "Spring Test Generator"
-            )
-        }
-    }
-
-    private fun testPackageName(endpoint: com.newbieking.springtestgen.psi.EndpointMetadata): String {
-        val controllerPackage = endpoint.controllerQualifiedName?.substringBeforeLast('.', "") ?: ""
-        return if (controllerPackage.isBlank()) "test" else "$controllerPackage.test"
     }
 
     // ----------------- Gutter 图标提供者 -----------------

@@ -1,44 +1,65 @@
 <idea-plugin>
-    <id>com.newbieking.spring-test-generator</id>
-    <name>Spring Boot Test Generator</name>
-    <vendor email="support@example.com" url="https://example.com">Example</vendor>
+    <id>com.newbieking.springtestgen</id>
+    <name>Spring Test Generator</name>
+    <vendor url="https://github.com/yinzhenyu1994/spring-test-generator-plugin">newbieking</vendor>
 
     <description><![CDATA[
-        Automatically generate MockMvc test scripts for Spring Boot web endpoints.
-        AI-powered data generation (OpenAI-compatible) supported.
+        Generate comprehensive Spring Boot test cases with a single click.
+        Supports Controller (MockMvc/RestAssured/WebTestClient), Service, Component,
+        Repository, Mapper, and Utility classes with intelligent test scenario generation.
     ]]></description>
 
-    <depends>com.intellij.modules.java</depends>
-    <depends optional="true">org.jetbrains.kotlin</depends>
+    <depends>com.intellij.modules.platform</depends>
+    <depends>com.intellij.modules.lang</depends>
+    <depends>com.intellij.java</depends>
 
     <extensions defaultExtensionNs="com.intellij">
-        <!-- 设置页 -->
-        <projectConfigurable instance="com.newbieking.springtestgen.ui.SettingsConfigurable"
-                             displayName="Spring Test Generator"
-                             id="spring.test.generator.settings"/>
+        <!-- 统一的类级别 Gutter Icon：对所有 bean 类型一视同仁 -->
+        <codeInsight.lineMarkerProvider
+            language="JAVA"
+            implementationClass="com.newbieking.springtestgen.actions.ClassLevelLineMarkerProvider"/>
 
-        <!-- Gutter 图标提供者 -->
-        <codeInsight.lineMarkerProvider language="JAVA"
-                                        implementationClass="com.newbieking.springtestgen.actions.GenerateTestForMethodAction$LineMarkerProvider"/>
-        <codeInsight.lineMarkerProvider language="kotlin"
-                                        implementationClass="com.newbieking.springtestgen.actions.GenerateTestForMethodAction$LineMarkerProvider"/>
+        <codeInsight.lineMarkerProvider
+            language="JAVA"
+            implementationClass="com.newbieking.springtestgen.actions.GenerateTestForMethodAction$LineMarkerProvider"/>
 
-        <!-- 后台服务 -->
-        <projectService serviceImplementation="com.newbieking.springtestgen.services.SettingsService"/>
+        <!-- Kotlin 支持 -->
+        <codeInsight.lineMarkerProvider
+            language="kotlin"
+            implementationClass="com.newbieking.springtestgen.actions.ClassLevelLineMarkerProvider"/>
+
+        <codeInsight.lineMarkerProvider
+            language="kotlin"
+            implementationClass="com.newbieking.springtestgen.actions.GenerateTestForMethodAction$LineMarkerProvider"/>
+
+        <!-- 应用级别配置 -->
+        <applicationConfigurable
+            parentId="tools"
+            instance="com.newbieking.springtestgen.ui.SettingsConfigurable"
+            id="com.newbieking.springtestgen.ui.SettingsConfigurable"
+            displayName="Spring Test Generator"/>
+
+        <!-- 项目级别设置持久化 -->
+        <projectService
+            serviceImplementation="com.newbieking.springtestgen.services.SettingsService"/>
     </extensions>
 
     <actions>
-        <!-- 针对方法生成（Gutter 点击也会触发此 Action） -->
-        <action id="GenerateTestForMethod" class="com.newbieking.springtestgen.actions.GenerateTestForMethodAction"
-                text="Generate Test for Endpoint" description="Generate MockMvc test for this endpoint">
-            <add-to-group group-id="EditorPopupMenu" anchor="first"/>
-            <keyboard-shortcut keymap="$default" first-keystroke="ctrl alt T"/>
+        <!-- 统一的 Generate Test Action（类级别入口，用于 Project View 右键菜单） -->
+        <action id="SpringTestGen.GenerateTestAction"
+                class="com.newbieking.springtestgen.actions.GenerateTestAction"
+                text="Generate Spring Test"
+                description="Generate test class for selected Spring bean (Controller/Service/Component/Repository/Mapper/Utility)">
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+            <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
         </action>
 
-        <!-- 批量生成 Controller 所有端点 -->
-        <action id="GenerateTestForController" class="com.newbieking.springtestgen.actions.GenerateTestForControllerAction"
-                text="Generate Tests for All Endpoints" description="Generate tests for all endpoints in this controller">
-            <add-to-group group-id="EditorPopupMenu" anchor="after" relative-to-action="GenerateTestForMethod"/>
+        <!-- 方法级别 Action（Controller 端点方法，保留在方法右键菜单） -->
+        <action id="SpringTestGen.GenerateTestMethodAction"
+                class="com.newbieking.springtestgen.actions.GenerateTestForMethodAction"
+                text="Generate Test for Endpoint Method"
+                description="Generate test cases for a single Spring MVC endpoint method">
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
         </action>
     </actions>
 </idea-plugin>
