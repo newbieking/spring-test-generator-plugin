@@ -16,11 +16,9 @@ import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiManager
 import com.newbieking.springtestgen.generator.ClassTestScriptGenerator
 import com.newbieking.springtestgen.generator.TestScriptGenerator
-import com.newbieking.springtestgen.model.ClassUnderTestMetadata
 import com.newbieking.springtestgen.model.TargetType
 import com.newbieking.springtestgen.psi.ClassUnderTestParser
 import com.newbieking.springtestgen.psi.SpringEndpointParser
-import com.newbieking.springtestgen.ui.ClassTestDialog
 import com.newbieking.springtestgen.ui.GenerateTestDialog
 import com.newbieking.springtestgen.utils.TestFileWriter
 import kotlinx.coroutines.runBlocking
@@ -31,10 +29,9 @@ import kotlinx.coroutines.runBlocking
  * 对所有 TargetType 一视同仁 —— Controller、Service、Component、
  * Repository、Mapper、Utility —— 不做 Controller / 非 Controller 的二分区分。
  *
- * 在类声明处显示 Gutter Icon，点击后根据类型自动路由到正确的生成流程：
- * - Controller  → 解析端点 → GenerateTestDialog → TestScriptGenerator (MockMvc)
- * - Service/Component/Repository/Mapper/Utility → ClassUnderTestParser → ClassTestDialog → ClassTestScriptGenerator (JUnit 5 + Mockito)
- * - UNSUPPORTED  → 不显示图标
+ * 在类声明处显示 Gutter Icon，点击后弹出统一的 [GenerateTestDialog]，
+ * 根据目标类型动态显示配置选项（Controller 显示框架/AI 选项，其他类型显示摘要信息），
+ * 确认后自动路由到对应的生成器。
  *
  * 注意：方法级别的 Gutter Icon（单个端点）由 GenerateTestForMethodAction.LineMarkerProvider 继续提供，
  *       与此类级别的 Provider 互不干扰。
@@ -80,32 +77,33 @@ class ClassLevelLineMarkerProvider : com.intellij.codeInsight.daemon.LineMarkerP
         val targetType = detectTargetType(psiClass)
         if (targetType == TargetType.UNSUPPORTED) return null
 
-        val project = element.project
-        val label = typeLabel(targetType)
-
         return LineMarkerInfo(
             psiClass,
             psiClass.nameIdentifier!!.textRange,
             AllIcons.RunConfigurations.TestState.Run,
-            { "Generate tests for $label" },
+            { "Generate tests for $targetType" },
             { _, elt ->
-                handleGenerate(project, elt, targetType)
+                handleGenerate(elt.project, elt, targetType)
             },
             GutterIconRenderer.Alignment.LEFT
         )
     }
 
-    /** 点击 Gutter Icon 后的统一路由。 */
+    /** 统一的点击处理入口，使用 [GenerateTestDialog] 完成配置后路由到对应生成器。 */
     private fun handleGenerate(project: Project, psiClass: PsiClass, targetType: TargetType) {
+        // 使用 ClassUnderTestParser 获取完整元数据
+        val parser = ClassUnderTestParser()
+        val metadata = parser.parse(psiClass)
+
         when (targetType) {
-            TargetType.CONTROLLER -> handleControllerGenerate(project, psiClass)
-            else -> handleNonControllerGenerate(project, psiClass, targetType)
+            TargetType.CONTROLLER -> handleController(project, psiClass)
+            else -> handleNonController(project, metadata)
         }
     }
 
-    // ---- Controller 路径（MockMvc） ----
+    // ---- Controller 路径 ----
 
-    private fun handleControllerGenerate(project: Project, psiClass: PsiClass) {
+    private fun handleController(project: Project, psiClass: PsiClass) {
         val parser = SpringEndpointParser(PsiManager.getInstance(project))
         val endpoints = parser.parseController(psiClass)
         if (endpoints.isEmpty()) {
@@ -117,7 +115,8 @@ class ClassLevelLineMarkerProvider : com.intellij.codeInsight.daemon.LineMarkerP
             return
         }
 
-        val dialog = GenerateTestDialog(project, endpoints)
+        val dialog = GenerateTestDialog(project)
+        dialog.configureForController(psiClass.name ?: "Controller", endpoints.size)
         if (!dialog.showAndGet()) return
 
         ProgressManager.getInstance().run(object : Task.Backgroundable(
@@ -143,77 +142,51 @@ class ClassLevelLineMarkerProvider : com.intellij.codeInsight.daemon.LineMarkerP
         })
     }
 
-    // ---- 非 Controller 路径（JUnit 5 + Mockito） ----
+    // ---- 非 Controller 路径 ----
 
-    private fun handleNonControllerGenerate(project: Project, psiClass: PsiClass, targetType: TargetType) {
-        val parser = ClassUnderTestParser()
-        val metadata = parser.parse(psiClass)
-
-        when {
-            metadata.targetType == TargetType.UNSUPPORTED -> {
-                Messages.showInfoMessage(
-                    project,
-                    "${metadata.simpleName} (${metadata.targetType}) is not supported for automatic test generation.\n\n" +
-                        "Reason: ${metadata.unsupportedReason ?: "No applicable test strategy."}",
-                    "Spring Test Generator"
-                )
-            }
-            metadata.targetType in GENERATABLE_TYPES -> {
-                val dialog = ClassTestDialog(project, metadata)
-                if (!dialog.showAndGet()) return
-
-                val testClassName = dialog.getTestClassName()
-                if (testClassName.isBlank()) {
-                    Messages.showWarningDialog(project, "Test class name cannot be empty.", "Spring Test Generator")
-                    return
-                }
-
-                ProgressManager.getInstance().run(object : Task.Backgroundable(
-                    project, "Generating Test for ${metadata.simpleName}", true
-                ) {
-                    override fun run(indicator: ProgressIndicator) {
-                        indicator.text = "Analyzing class and generating test..."
-                        val generator = ClassTestScriptGenerator()
-                        val testClass = generator.generateTestClass(metadata, testClassName)
-                        ApplicationManager.getApplication().invokeLater {
-                            WriteCommandAction.runWriteCommandAction(project) {
-                                TestFileWriter.writeTestFile(
-                                    project,
-                                    testClassName,
-                                    TestFileWriter.deriveTestPackageName(metadata.qualifiedName),
-                                    testClass
-                                )
-                            }
-                        }
-                    }
-                })
-            }
-            else -> {
-                log.warn("Unexpected target type in LineMarker callback: $targetType")
-            }
+    private fun handleNonController(project: Project, metadata: com.newbieking.springtestgen.model.ClassUnderTestMetadata) {
+        if (metadata.targetType == TargetType.UNSUPPORTED) {
+            Messages.showInfoMessage(
+                project,
+                "${metadata.simpleName} (${metadata.targetType}) is not supported for automatic test generation.\n\n" +
+                    "Reason: ${metadata.unsupportedReason ?: "No applicable test strategy."}",
+                "Spring Test Generator"
+            )
+            return
         }
-    }
 
-    private fun typeLabel(targetType: TargetType): String = when (targetType) {
-        TargetType.CONTROLLER -> "this Controller"
-        TargetType.SERVICE -> "this Service"
-        TargetType.COMPONENT -> "this Component"
-        TargetType.REPOSITORY -> "this Repository"
-        TargetType.MAPPER -> "this Mapper"
-        TargetType.UTILITY -> "this class"
-        TargetType.UNSUPPORTED -> error("Unsupported should not reach here")
+        val dialog = GenerateTestDialog(project)
+        dialog.configureForClass(metadata)
+        if (!dialog.showAndGet()) return
+
+        val testClassName = dialog.getTestClassName()
+        if (testClassName.isBlank()) {
+            Messages.showWarningDialog(project, "Test class name cannot be empty.", "Spring Test Generator")
+            return
+        }
+
+        ProgressManager.getInstance().run(object : Task.Backgroundable(
+            project, "Generating Test for ${metadata.simpleName}", true
+        ) {
+            override fun run(indicator: ProgressIndicator) {
+                indicator.text = "Analyzing class and generating test..."
+                val generator = ClassTestScriptGenerator()
+                val testClass = generator.generateTestClass(metadata, testClassName)
+                ApplicationManager.getApplication().invokeLater {
+                    WriteCommandAction.runWriteCommandAction(project) {
+                        TestFileWriter.writeTestFile(
+                            project,
+                            testClassName,
+                            TestFileWriter.deriveTestPackageName(metadata.qualifiedName),
+                            testClass
+                        )
+                    }
+                }
+            }
+        })
     }
 
     companion object {
-        /** 可被 ClassTestScriptGenerator 直接处理的目标类型 */
-        private val GENERATABLE_TYPES: Set<TargetType> = setOf(
-            TargetType.SERVICE,
-            TargetType.COMPONENT,
-            TargetType.REPOSITORY,
-            TargetType.MAPPER,
-            TargetType.UTILITY
-        )
-
         // 以下常量与 ClassUnderTestParser 中的注解集合保持一致
         private val CONTROLLER_ANNOTATIONS = setOf(
             "org.springframework.web.bind.annotation.RestController",

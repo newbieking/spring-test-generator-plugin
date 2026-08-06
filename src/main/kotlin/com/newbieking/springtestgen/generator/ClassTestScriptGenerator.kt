@@ -38,6 +38,9 @@ class ClassTestScriptGenerator(
         }
         val body = listOf(members, methods).filter(String::isNotBlank).joinToString("\n\n")
             .ifBlank { "// No public methods were found for deterministic test generation." }
+        val indentedBody = body.lines().joinToString("\n") { line ->
+            if (line.isBlank()) "" else "    $line"
+        }
         val packageName = if (metadata.packageName.isBlank()) "test" else "${metadata.packageName}.test"
 
         return """
@@ -47,7 +50,7 @@ class ClassTestScriptGenerator(
 
             public class $testClassName {
 
-            ${body.prependIndent("    ")}
+            $indentedBody
             }
         """.trimIndent()
     }
@@ -56,21 +59,26 @@ class ClassTestScriptGenerator(
         metadata: ClassUnderTestMetadata,
         scenarios: List<ClassTestScenario>,
         usesMockito: Boolean
-    ): String = buildSet {
-        metadata.qualifiedName?.let(::add)
-        metadata.dependencies.mapNotNull { it.qualifiedType }
-            .filterNot { it.startsWith("java.lang.") }
-            .forEach(::add)
-        add("org.junit.jupiter.api.Test")
-        if (scenarios.any { it.disabledReason != null }) add("org.junit.jupiter.api.Disabled")
-        if (usesMockito) {
-            add("org.junit.jupiter.api.extension.ExtendWith")
-            add("org.mockito.Mock")
-            add("org.mockito.junit.jupiter.MockitoExtension")
-            if (!metadata.isInterface) add("org.mockito.InjectMocks")
+    ): String {
+        val regular = buildSet {
+            metadata.qualifiedName?.let(::add)
+            metadata.dependencies.mapNotNull { it.qualifiedType }
+                .filterNot { it.startsWith("java.lang.") }
+                .forEach(::add)
+            add("org.junit.jupiter.api.Test")
+            if (scenarios.any { it.disabledReason != null }) add("org.junit.jupiter.api.Disabled")
+            if (usesMockito) {
+                add("org.junit.jupiter.api.extension.ExtendWith")
+                add("org.mockito.Mock")
+                add("org.mockito.junit.jupiter.MockitoExtension")
+                if (!metadata.isInterface) add("org.mockito.InjectMocks")
+            }
         }
-        add("org.junit.jupiter.api.Assertions.assertDoesNotThrow")
-    }.sorted().joinToString("\n") { "import $it;" }
+        val staticImports = setOf("org.junit.jupiter.api.Assertions.assertDoesNotThrow")
+
+        return (regular.sorted().map { "import $it;" } + staticImports.sorted().map { "import static $it;" })
+            .joinToString("\n")
+    }
 
     private fun buildMembers(
         metadata: ClassUnderTestMetadata,
@@ -79,21 +87,21 @@ class ClassTestScriptGenerator(
         utilityCanInstantiate: Boolean
     ): String = buildString {
         if (usesMockito) {
-            appendLine("    @ExtendWith(MockitoExtension.class)")
-            appendLine("    ")
+            appendLine("@ExtendWith(MockitoExtension.class)")
+            appendLine()
             metadata.dependencies
                 .distinctBy { it.name to it.type }
                 .forEach { dependency ->
-                    appendLine("    @Mock")
-                    appendLine("    private ${sourceTypeName(dependency.type)} ${dependency.name};")
+                    appendLine("@Mock")
+                    appendLine("private ${sourceTypeName(dependency.type)} ${dependency.name};")
                 }
-            appendLine(if (metadata.isInterface) "    @Mock" else "    @InjectMocks")
-            append("    private ${sourceTypeName(metadata.simpleName)} ${targetFieldName(metadata)};")
+            appendLine(if (metadata.isInterface) "@Mock" else "@InjectMocks")
+            append("private ${sourceTypeName(metadata.simpleName)} ${targetFieldName(metadata)};")
         } else if (utilityHasInstanceMethods) {
             if (utilityCanInstantiate) {
-                append("    private final ${sourceTypeName(metadata.simpleName)} ${targetFieldName(metadata)} = new ${sourceTypeName(metadata.simpleName)}();")
+                append("private final ${sourceTypeName(metadata.simpleName)} ${targetFieldName(metadata)} = new ${sourceTypeName(metadata.simpleName)}();")
             } else {
-                append("    private ${sourceTypeName(metadata.simpleName)} ${targetFieldName(metadata)};")
+                append("private ${sourceTypeName(metadata.simpleName)} ${targetFieldName(metadata)};")
             }
         }
     }.trimEnd()
@@ -136,7 +144,7 @@ class ClassTestScriptGenerator(
             }
             appendLine()
             append("}")
-        }.prependIndent("    ")
+        }
     }
 
     private fun targetFieldName(metadata: ClassUnderTestMetadata): String =
