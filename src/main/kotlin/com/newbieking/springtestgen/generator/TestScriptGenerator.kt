@@ -18,7 +18,7 @@ class TestScriptGenerator(private val project: Project) {
 
     private val aiService: AIGenerationService? by lazy {
         val settings = SettingsService.getInstance(project)
-        if (settings.getConfig().enableAI) OpenAIApiClient(settings) else null
+        if (settings.getConfig().enableAI) OpenAIApiClient(project) else null
     }
 
     private val testCaseGenerator = DeterministicTestCaseGenerator()
