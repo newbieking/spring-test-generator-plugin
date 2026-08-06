@@ -10,6 +10,7 @@ import com.newbieking.springtestgen.testcase.DeterministicTestCaseGenerator
 import com.newbieking.springtestgen.testcase.ExpectedHttpStatus
 import com.newbieking.springtestgen.testcase.TestCaseModel
 import com.newbieking.springtestgen.testcase.TestScenarioType
+import com.newbieking.springtestgen.utils.DiagnosticLogger
 
 /** Generates JUnit 5 and MockMvc tests from deterministic test-case models. */
 class TestScriptGenerator(private val project: Project) {
@@ -62,7 +63,7 @@ public class $testClassName {
         appendLine()
         appendLine("import org.junit.jupiter.api.Test;")
         appendLine("import org.springframework.beans.factory.annotation.Autowired;")
-        appendLine("import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;")
+        appendLine("import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;")
         appendLine("import org.springframework.http.MediaType;")
         appendLine("import org.springframework.test.web.servlet.MockMvc;")
         appendLine()
@@ -84,7 +85,9 @@ public class $testClassName {
             currentPath.replace("{${pathVariable.name}}", "testValue")
         }
         val requestBodyType = endpoint.requestBodyType
-        log.debug("Generating ${testCase.scenarioType} for $httpMethod $path (${endpoint.controllerName}#$methodName)")
+        val scenarioType = testCase.scenarioType
+        DiagnosticLogger.log("[TestScriptGen] $httpMethod $path | scenario=$scenarioType | requestBodyType=$requestBodyType | requestParams=${endpoint.requestParams.map { it.name }} | useAI=$useAI | hasBodyJson=${testCase.requestBodyJson != null}")
+        log.debug("Generating $scenarioType for $httpMethod $path (${endpoint.controllerName}#$methodName)")
 
         val performBlock = buildString {
             append("mockMvc.perform(")

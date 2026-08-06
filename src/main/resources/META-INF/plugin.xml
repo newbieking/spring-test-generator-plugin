@@ -4,7 +4,9 @@
     <vendor email="support@example.com" url="https://example.com">Example</vendor>
 
     <description><![CDATA[
-        Automatically generate MockMvc test scripts for Spring Boot web endpoints.
+        Generate JUnit 5 / MockMvc test scripts for Spring Boot projects.
+        Supports Controllers (MockMvc/RestAssured/WebTestClient), Services,
+        Components, Repositories, Mappers, and Utility classes.
         AI-powered data generation (OpenAI-compatible) supported.
     ]]></description>
 
@@ -17,14 +19,23 @@
                              displayName="Spring Test Generator"
                              id="spring.test.generator.settings"/>
 
-        <!-- Gutter 图标提供者 -->
+        <!-- 方法级别 Gutter Icon：单个 Controller 端点 -->
         <codeInsight.lineMarkerProvider language="JAVA"
                                         implementationClass="com.newbieking.springtestgen.actions.GenerateTestForMethodAction$LineMarkerProvider"/>
         <codeInsight.lineMarkerProvider language="kotlin"
                                         implementationClass="com.newbieking.springtestgen.actions.GenerateTestForMethodAction$LineMarkerProvider"/>
 
+        <!-- 类级别 Gutter Icon：统一入口，Controller/Service/Component/Repository/Mapper/Utility 一视同仁 -->
+        <codeInsight.lineMarkerProvider language="JAVA"
+                                        implementationClass="com.newbieking.springtestgen.actions.ClassLevelLineMarkerProvider"/>
+        <codeInsight.lineMarkerProvider language="kotlin"
+                                        implementationClass="com.newbieking.springtestgen.actions.ClassLevelLineMarkerProvider"/>
+
         <!-- 后台服务 -->
         <projectService serviceImplementation="com.newbieking.springtestgen.services.SettingsService"/>
+
+        <!-- 启动诊断日志 -->
+        <postStartupActivity implementation="com.newbieking.springtestgen.actions.PluginStartupActivity"/>
     </extensions>
 
     <actions>
@@ -39,6 +50,13 @@
         <action id="GenerateTestForController" class="com.newbieking.springtestgen.actions.GenerateTestForControllerAction"
                 text="Generate Tests for All Endpoints" description="Generate tests for all endpoints in this controller">
             <add-to-group group-id="EditorPopupMenu" anchor="after" relative-to-action="GenerateTestForMethod"/>
+        </action>
+
+        <!-- 非 Controller 目标（Service/Component/Repository/Mapper/Utility） -->
+        <action id="GenerateTestForClass" class="com.newbieking.springtestgen.actions.GenerateTestForClassAction"
+                text="Generate Tests for This Class" description="Generate deterministic JUnit 5 tests for this class">
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
         </action>
     </actions>
 </idea-plugin>
