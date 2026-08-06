@@ -10,15 +10,13 @@ import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.progress.Task
-import com.intellij.openapi.project.Project
-import com.intellij.openapi.ui.Messages
 import com.intellij.psi.PsiClass
 import com.intellij.psi.PsiManager
 import com.intellij.psi.util.PsiTreeUtil
 import com.newbieking.springtestgen.generator.TestScriptGenerator
 import com.newbieking.springtestgen.psi.SpringEndpointParser
 import com.newbieking.springtestgen.ui.GenerateTestDialog
-import com.newbieking.springtestgen.utils.PsiUtils
+import com.newbieking.springtestgen.utils.TestFileWriter
 import kotlinx.coroutines.runBlocking
 
 /**
@@ -64,7 +62,12 @@ class GenerateTestForControllerAction : AnAction() {
                     log.info("Test source generated for ${endpoints.size} endpoint(s)")
                     ApplicationManager.getApplication().invokeLater {
                         WriteCommandAction.runWriteCommandAction(project) {
-                            writeTestFile(project, dialog.getTestClassName(), testPackageName(endpoints.first()), testClass)
+                            TestFileWriter.writeTestFile(
+                                project,
+                                dialog.getTestClassName(),
+                                TestFileWriter.deriveTestPackageName(endpoints.first().controllerQualifiedName),
+                                testClass
+                            )
                         }
                     }
                 }
@@ -93,44 +96,3 @@ class GenerateTestForControllerAction : AnAction() {
         }
     }
 
-    private fun writeTestFile(
-        project: Project,
-        testClassName: String,
-        testPackageName: String,
-        content: String
-    ) {
-        val baseDir = project.baseDir
-        val testSrcDir = baseDir.findChild("src")?.findChild("test")?.findChild("java")
-        if (testSrcDir != null) {
-            val psiDir = PsiManager.getInstance(project).findDirectory(testSrcDir)
-            if (psiDir != null) {
-                val packageDir = testPackageName.split('.').filter(String::isNotBlank).fold(psiDir) { directory, segment ->
-                    directory.findSubdirectory(segment) ?: directory.createSubdirectory(segment)
-                }
-                val fileName = "$testClassName.java"
-                val existingFile = packageDir.findFile(fileName)
-                if (existingFile != null) {
-                    PsiUtils.setContent(existingFile, content)
-                    log.info("Updated generated test file: ${existingFile.virtualFile.path}")
-                } else {
-                    packageDir.createFile(fileName).let {
-                        PsiUtils.setContent(it, content)
-                        log.info("Created generated test file: ${it.virtualFile.path}")
-                    }
-                }
-            }
-        } else {
-            log.warn("Unable to write generated test '$testClassName': src/test/java directory not found in ${project.basePath}")
-            Messages.showWarningDialog(
-                project,
-                "Could not find src/test/java directory.",
-                "Spring Test Generator"
-            )
-        }
-    }
-
-    private fun testPackageName(endpoint: com.newbieking.springtestgen.psi.EndpointMetadata): String {
-        val controllerPackage = endpoint.controllerQualifiedName?.substringBeforeLast('.', "") ?: ""
-        return if (controllerPackage.isBlank()) "test" else "$controllerPackage.test"
-    }
-}
