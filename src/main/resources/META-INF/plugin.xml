@@ -4,9 +4,7 @@
     <vendor email="support@example.com" url="https://example.com">Example</vendor>
 
     <description><![CDATA[
-        Generate JUnit 5 / MockMvc test scripts for Spring Boot projects.
-        Supports Controllers (MockMvc/RestAssured/WebTestClient), Services,
-        Components, Repositories, Mappers, and Utility classes.
+        Automatically generate MockMvc test scripts for Spring Boot web endpoints.
         AI-powered data generation (OpenAI-compatible) supported.
     ]]></description>
 
@@ -41,12 +39,6 @@
         <action id="GenerateTestForController" class="com.newbieking.springtestgen.actions.GenerateTestForControllerAction"
                 text="Generate Tests for All Endpoints" description="Generate tests for all endpoints in this controller">
             <add-to-group group-id="EditorPopupMenu" anchor="after" relative-to-action="GenerateTestForMethod"/>
-        </action>
-
-        <!-- 非 Controller 目标（Service/Component/Repository/Mapper/Utility） -->
-        <action id="GenerateTestForClass" class="com.newbieking.springtestgen.actions.GenerateTestForClassAction"
-                text="Generate Tests for This Class" description="Generate deterministic JUnit 5 tests for this class">
-            <add-to-group group-id="EditorPopupMenu" anchor="after" relative-to-action="GenerateTestForController"/>
         </action>
     </actions>
 </idea-plugin>
