@@ -8,17 +8,21 @@ import com.intellij.util.xmlb.XmlSerializerUtil
  * Persistent project-level settings for the Spring Test Generator plugin.
  *
  * Covers both AI provider configuration and test generation policy.
+ * Supports multiple AI providers with priority-based fallback ordering.
  */
 @Service(Service.Level.PROJECT)
 @State(name = "SpringTestGeneratorSettings", storages = [Storage("springTestGenerator.xml")])
 class SettingsService : PersistentStateComponent<SettingsService.State> {
 
     data class State(
-        // --- AI Provider ---
+        // --- AI Provider (legacy single-provider, kept for backward compatibility) ---
         var baseUrl: String = "https://api.openai.com/v1",
         var apiKey: String = "",
         var model: String = "gpt-3.5-turbo",
         var enableAI: Boolean = true,
+
+        // --- Multi-provider configuration ---
+        var providers: MutableList<ProviderState> = mutableListOf(),
 
         // --- Test Generation Policy ---
         var generationMode: String = GenerationMode.DETERMINISTIC.id,
@@ -33,6 +37,50 @@ class SettingsService : PersistentStateComponent<SettingsService.State> {
         var enableStateMachineScenarios: Boolean = false
     )
 
+    /**
+     * XML-serializable state for a single AI provider.
+     * Used by IntelliJ's PersistentStateComponent for list storage.
+     */
+    data class ProviderState(
+        var id: String = "",
+        var displayName: String = "",
+        var baseUrl: String = "",
+        var apiKey: String = "",
+        var model: String = "",
+        var timeoutSeconds: Int = 30,
+        var maxRetries: Int = 1,
+        var priority: Int = 0,
+        var enabled: Boolean = true
+    ) {
+        /** Convert to an AIProviderConfig. */
+        fun toProviderConfig(): AIProviderConfig = AIProviderConfig(
+            id = id,
+            displayName = displayName,
+            baseUrl = baseUrl,
+            apiKey = apiKey,
+            model = model,
+            timeoutSeconds = timeoutSeconds,
+            maxRetries = maxRetries,
+            priority = priority,
+            enabled = enabled
+        )
+
+        companion object {
+            /** Create from an AIProviderConfig. */
+            fun fromProviderConfig(config: AIProviderConfig): ProviderState = ProviderState(
+                id = config.id,
+                displayName = config.displayName,
+                baseUrl = config.baseUrl,
+                apiKey = config.apiKey,
+                model = config.model,
+                timeoutSeconds = config.timeoutSeconds,
+                maxRetries = config.maxRetries,
+                priority = config.priority,
+                enabled = config.enabled
+            )
+        }
+    }
+
     private var myState = State()
 
     override fun getState(): State = myState
@@ -42,6 +90,7 @@ class SettingsService : PersistentStateComponent<SettingsService.State> {
 
     fun getConfig(): State = myState
 
+    /** Update the legacy single-provider config fields. */
     fun setConfig(baseUrl: String, apiKey: String, model: String, enableAI: Boolean) {
         myState.baseUrl = baseUrl
         myState.apiKey = apiKey
@@ -68,6 +117,56 @@ class SettingsService : PersistentStateComponent<SettingsService.State> {
         myState.enableIdempotencyScenarios = enableIdempotencyScenarios
         myState.enableConcurrencyScenarios = enableConcurrencyScenarios
         myState.enableStateMachineScenarios = enableStateMachineScenarios
+    }
+
+    // --- Multi-provider management ---
+
+    /** Get all provider configs as AIProviderConfig instances. */
+    fun getProviderConfigs(): List<AIProviderConfig> =
+        myState.providers.map { it.toProviderConfig() }
+
+    /** Get a specific provider config by ID. */
+    fun getProviderConfig(id: String): AIProviderConfig? =
+        myState.providers.find { it.id == id }?.toProviderConfig()
+
+    /** Add or update a provider config. Changes take effect immediately. */
+    fun setProviderConfig(config: AIProviderConfig) {
+        val existingIndex = myState.providers.indexOfFirst { it.id == config.id }
+        val providerState = ProviderState.fromProviderConfig(config)
+        if (existingIndex >= 0) {
+            myState.providers[existingIndex] = providerState
+        } else {
+            myState.providers.add(providerState)
+        }
+    }
+
+    /** Remove a provider config by ID. Returns true if it existed. */
+    fun removeProviderConfig(id: String): Boolean {
+        return myState.providers.removeIf { it.id == id }
+    }
+
+    /** Reorder providers by setting a new priority order. */
+    fun reorderProviders(orderedIds: List<String>) {
+        orderedIds.forEachIndexed { index, id ->
+            myState.providers.find { it.id == id }?.priority = index
+        }
+    }
+
+    /**
+     * Migrate the legacy single-provider fields to the multi-provider list.
+     * Called once when upgrading from a version that only had single-provider config.
+     * Does nothing if providers are already configured.
+     */
+    fun migrateLegacyProviderConfig() {
+        if (myState.providers.isNotEmpty()) return
+        if (myState.baseUrl.isBlank() && myState.apiKey.isBlank()) return
+
+        val legacyConfig = AIProviderConfig.openaiDefault(
+            apiKey = myState.apiKey,
+            model = myState.model,
+            baseUrl = myState.baseUrl
+        )
+        myState.providers.add(ProviderState.fromProviderConfig(legacyConfig))
     }
 
     /** Convenience: get the resolved generation mode enum. */

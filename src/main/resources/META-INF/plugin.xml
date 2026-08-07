@@ -17,6 +17,9 @@
                              displayName="Spring Test Generator"
                              id="spring.test.generator.settings"/>
 
+        <!-- 通知组 -->
+        <notificationGroup id="Spring Test Generator AI Degradation" displayType="BALLOON"/>
+
         <!-- Gutter 图标提供者 -->
         <codeInsight.lineMarkerProvider language="JAVA"
                                         implementationClass="com.newbieking.springtestgen.actions.GenerateTestForMethodAction$LineMarkerProvider"/>
@@ -25,6 +28,8 @@
 
         <!-- 后台服务 -->
         <projectService serviceImplementation="com.newbieking.springtestgen.services.SettingsService"/>
+        <projectService serviceImplementation="com.newbieking.springtestgen.services.AIProviderRegistry"/>
+        <projectService serviceImplementation="com.newbieking.springtestgen.services.AIDegradationManager"/>
     </extensions>
 
     <actions>
