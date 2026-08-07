@@ -48,9 +48,6 @@ class SettingsConfigurable(private val project: Project) : Configurable {
         settings = SettingsService.getInstance(project)
         val current = settings!!.getConfig()
 
-        // Migrate legacy config if needed
-        settings!!.migrateLegacyProviderConfig()
-
         // Global AI toggle
         enableAICheckBox.isSelected = current.enableAI
 
