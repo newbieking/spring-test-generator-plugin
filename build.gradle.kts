@@ -14,6 +14,7 @@ repositories {
 dependencies {
     implementation("com.google.code.gson:gson:2.10.1")
     testImplementation(kotlin("test"))
+    testImplementation("io.mockk:mockk:1.13.9")
 }
 
 intellij {

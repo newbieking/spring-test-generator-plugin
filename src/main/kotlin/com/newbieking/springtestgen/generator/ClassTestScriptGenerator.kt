@@ -8,14 +8,21 @@ import com.newbieking.springtestgen.strategy.TestStrategyRegistry
 import com.newbieking.springtestgen.strategy.TestStrategySelection
 import com.newbieking.springtestgen.testcase.ClassTestScenario
 import com.newbieking.springtestgen.testcase.DeterministicClassTestCaseGenerator
+import com.newbieking.springtestgen.testcase.RiskScenarioLabel
+import com.newbieking.springtestgen.testcase.RiskScenarioRegistry
 
 /** Generates editable JUnit 5 tests for utility, Service/Component, Repository, and Mapper targets. */
 class ClassTestScriptGenerator(
     private val strategyRegistry: TestStrategyRegistry = TestStrategyRegistry(),
-    private val scenarioGenerator: DeterministicClassTestCaseGenerator = DeterministicClassTestCaseGenerator()
+    private val scenarioGenerator: DeterministicClassTestCaseGenerator = DeterministicClassTestCaseGenerator(),
+    private val riskScenarioRegistry: RiskScenarioRegistry = RiskScenarioRegistry()
 ) {
 
-    fun generateTestClass(metadata: ClassUnderTestMetadata, testClassName: String): String {
+    fun generateTestClass(
+        metadata: ClassUnderTestMetadata,
+        testClassName: String,
+        enabledRiskLabels: Set<RiskScenarioLabel> = emptySet()
+    ): String {
         require(testClassName.isNotBlank()) { "A test class name is required." }
         val selection = strategyRegistry.select(metadata)
         val strategy = (selection as? TestStrategySelection.Supported)?.strategy
@@ -24,7 +31,13 @@ class ClassTestScriptGenerator(
             "${metadata.targetType} generation is reserved for a later strategy implementation."
         }
 
-        val scenarios = scenarioGenerator.generate(metadata)
+        val deterministicScenarios = scenarioGenerator.generate(metadata)
+        val riskScenarios = if (enabledRiskLabels.isNotEmpty()) {
+            riskScenarioRegistry.generateForClass(metadata, enabledRiskLabels)
+        } else {
+            emptyList()
+        }
+        val scenarios = deterministicScenarios + riskScenarios
         val usesMockito = strategy.framework == TestFramework.JUNIT5_MOCKITO
         val utilityHasInstanceMethods = metadata.targetType == TargetType.UTILITY &&
             scenarios.any { !it.method.isStatic }

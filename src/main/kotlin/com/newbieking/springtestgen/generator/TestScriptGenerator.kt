@@ -6,6 +6,8 @@ import com.newbieking.springtestgen.psi.EndpointMetadata
 import com.newbieking.springtestgen.services.*
 import com.newbieking.springtestgen.testcase.DeterministicTestCaseGenerator
 import com.newbieking.springtestgen.testcase.ExpectedHttpStatus
+import com.newbieking.springtestgen.testcase.RiskScenarioLabel
+import com.newbieking.springtestgen.testcase.RiskScenarioRegistry
 import com.newbieking.springtestgen.testcase.TestCaseModel
 import com.newbieking.springtestgen.testcase.TestScenarioType
 import com.newbieking.springtestgen.utils.DiagnosticLogger
@@ -37,6 +39,7 @@ class TestScriptGenerator(private val project: Project) {
     }
 
     private val testCaseGenerator = DeterministicTestCaseGenerator()
+    private val riskScenarioRegistry = RiskScenarioRegistry()
 
     /**
      * Synchronize provider configurations from settings to the registry.
@@ -81,8 +84,16 @@ class TestScriptGenerator(private val project: Project) {
         val controllerPackageName = controllerQualifiedName?.substringBeforeLast('.') ?: ""
         val testPackageName = if (controllerPackageName.isBlank()) "test" else "$controllerPackageName.test"
 
-        val testCases = testCaseGenerator.generate(endpoints)
-        log.info("Generating test class '$testClassName' for ${testCases.size} deterministic scenario(s); AI enabled: $useAI")
+        val settings = SettingsService.getInstance(project)
+        val deterministicCases = testCaseGenerator.generate(endpoints)
+        val riskCases = if (settings.isAnyRiskScenarioEnabled()) {
+            val enabledLabels = buildEnabledRiskLabels(settings)
+            endpoints.flatMap { riskScenarioRegistry.generateForEndpoint(it, enabledLabels) }
+        } else {
+            emptyList()
+        }
+        val testCases = deterministicCases + riskCases
+        log.info("Generating test class '$testClassName' for ${testCases.size} scenario(s) (${deterministicCases.size} deterministic + ${riskCases.size} risk); AI enabled: $useAI")
         val methods = testCases.map { testCase -> generateTestMethod(testCase, useAI) }
             .joinToString("\n\n")
 
@@ -165,6 +176,9 @@ public class $testClassName {
         val resultActions = when (testCase.expectedStatus) {
             ExpectedHttpStatus.OK -> ".andExpect(status().isOk())"
             ExpectedHttpStatus.BAD_REQUEST -> ".andExpect(status().isBadRequest())"
+            ExpectedHttpStatus.UNAUTHORIZED -> ".andExpect(status().isUnauthorized())"
+            ExpectedHttpStatus.FORBIDDEN -> ".andExpect(status().isForbidden())"
+            ExpectedHttpStatus.CONFLICT -> ".andExpect(status().isConflict())"
         }
 
         return """
@@ -183,4 +197,12 @@ public class $testClassName {
         .replace("\"", "\\\"")
         .replace("\r", "\\r")
         .replace("\n", "\\n")
+
+    private fun buildEnabledRiskLabels(settings: SettingsService): Set<RiskScenarioLabel> = buildSet {
+        val config = settings.getConfig()
+        if (config.enableSecurityScenarios) add(RiskScenarioLabel.SECURITY)
+        if (config.enableIdempotencyScenarios) add(RiskScenarioLabel.IDEMPOTENCY)
+        if (config.enableConcurrencyScenarios) add(RiskScenarioLabel.CONCURRENCY)
+        if (config.enableStateMachineScenarios) add(RiskScenarioLabel.STATE_MACHINE)
+    }
 }

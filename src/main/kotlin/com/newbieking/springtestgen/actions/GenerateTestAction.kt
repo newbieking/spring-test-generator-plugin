@@ -20,6 +20,8 @@ import com.newbieking.springtestgen.model.ClassUnderTestMetadata
 import com.newbieking.springtestgen.model.TargetType
 import com.newbieking.springtestgen.psi.ClassUnderTestParser
 import com.newbieking.springtestgen.psi.SpringEndpointParser
+import com.newbieking.springtestgen.services.SettingsService
+import com.newbieking.springtestgen.testcase.RiskScenarioLabel
 import com.newbieking.springtestgen.ui.GenerateTestDialog
 import com.newbieking.springtestgen.utils.TestFileWriter
 import kotlinx.coroutines.runBlocking
@@ -127,7 +129,9 @@ class GenerateTestAction : AnAction() {
             override fun run(indicator: ProgressIndicator) {
                 indicator.text = "Analyzing class and generating test..."
                 val generator = ClassTestScriptGenerator()
-                val testClass = generator.generateTestClass(metadata, testClassName)
+                val settings = SettingsService.getInstance(project)
+                val enabledRiskLabels = buildEnabledRiskLabels(settings)
+                val testClass = generator.generateTestClass(metadata, testClassName, enabledRiskLabels)
                 ApplicationManager.getApplication().invokeLater {
                     WriteCommandAction.runWriteCommandAction(project) {
                         TestFileWriter.writeTestFile(
@@ -173,4 +177,12 @@ class GenerateTestAction : AnAction() {
         }
         return null
     }
+}
+
+private fun buildEnabledRiskLabels(settings: SettingsService): Set<RiskScenarioLabel> = buildSet {
+    val config = settings.getConfig()
+    if (config.enableSecurityScenarios) add(RiskScenarioLabel.SECURITY)
+    if (config.enableIdempotencyScenarios) add(RiskScenarioLabel.IDEMPOTENCY)
+    if (config.enableConcurrencyScenarios) add(RiskScenarioLabel.CONCURRENCY)
+    if (config.enableStateMachineScenarios) add(RiskScenarioLabel.STATE_MACHINE)
 }
