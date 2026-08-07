@@ -39,9 +39,13 @@
             id="com.newbieking.springtestgen.ui.SettingsConfigurable"
             displayName="Spring Test Generator"/>
 
-        <!-- 项目级别设置持久化 -->
-        <projectService
-            serviceImplementation="com.newbieking.springtestgen.services.SettingsService"/>
+        <!-- 通知组 -->
+        <notificationGroup id="Spring Test Generator AI Degradation" displayType="BALLOON"/>
+
+        <!-- 项目级别服务 -->
+        <projectService serviceImplementation="com.newbieking.springtestgen.services.SettingsService"/>
+        <projectService serviceImplementation="com.newbieking.springtestgen.services.AIProviderRegistry"/>
+        <projectService serviceImplementation="com.newbieking.springtestgen.services.AIDegradationManager"/>
     </extensions>
 
     <actions>

@@ -3,9 +3,7 @@ package com.newbieking.springtestgen.generator
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
 import com.newbieking.springtestgen.psi.EndpointMetadata
-import com.newbieking.springtestgen.services.AIGenerationService
-import com.newbieking.springtestgen.services.OpenAIApiClient
-import com.newbieking.springtestgen.services.SettingsService
+import com.newbieking.springtestgen.services.*
 import com.newbieking.springtestgen.testcase.DeterministicTestCaseGenerator
 import com.newbieking.springtestgen.testcase.ExpectedHttpStatus
 import com.newbieking.springtestgen.testcase.TestCaseModel
@@ -19,10 +17,58 @@ class TestScriptGenerator(private val project: Project) {
 
     private val aiService: AIGenerationService? by lazy {
         val settings = SettingsService.getInstance(project)
-        if (settings.getConfig().enableAI) OpenAIApiClient(project) else null
+        if (!settings.getConfig().enableAI) return@lazy null
+
+        // Migrate legacy config if needed
+        settings.migrateLegacyProviderConfig()
+
+        val registry = AIProviderRegistry.getInstance(project)
+        val degradationManager = AIDegradationManager.getInstance(project)
+
+        // Sync providers from settings to registry
+        syncProvidersFromSettings(registry, settings)
+
+        if (!registry.hasAvailableProvider()) {
+            log.info("No AI providers available; AI generation disabled")
+            return@lazy null
+        }
+
+        DefaultAIGenerationService(registry, degradationManager, project = project)
     }
 
     private val testCaseGenerator = DeterministicTestCaseGenerator()
+
+    /**
+     * Synchronize provider configurations from settings to the registry.
+     * Creates or updates provider instances based on current settings.
+     */
+    private fun syncProvidersFromSettings(registry: AIProviderRegistry, settings: SettingsService) {
+        val configs = settings.getProviderConfigs()
+        if (configs.isEmpty()) {
+            log.info("No provider configs in settings; registry will be empty")
+            return
+        }
+
+        for (config in configs) {
+            val existingProvider = registry.getProvider(config.id)
+            if (existingProvider != null) {
+                // Update config if changed
+                registry.updateConfig(config)
+            } else {
+                // Register new provider (currently only OpenAI-compatible)
+                val provider = OpenAIApiClient(project, config)
+                registry.register(provider, config)
+            }
+        }
+
+        // Remove providers that are no longer in settings
+        val configIds = configs.map { it.id }.toSet()
+        for (id in registry.listProviderIds()) {
+            if (id !in configIds) {
+                registry.unregister(id)
+            }
+        }
+    }
 
     suspend fun generateTestClass(
         endpoints: List<EndpointMetadata>,

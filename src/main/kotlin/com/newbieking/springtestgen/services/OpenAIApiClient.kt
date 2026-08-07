@@ -5,7 +5,6 @@ import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
-import com.newbieking.springtestgen.prompt.PromptTemplateService
 import com.newbieking.springtestgen.psi.EndpointMetadata
 import kotlinx.coroutines.*
 import java.net.http.HttpClient
@@ -14,58 +13,97 @@ import java.net.http.HttpResponse
 import java.time.Duration
 
 /**
- * OpenAI-compatible API client that implements AI generation via prompt templates.
+ * OpenAI-compatible API client that implements [AIProvider].
  *
- * All prompt text is resolved through [PromptTemplateService], making prompts
- * configurable and centralised. If a template is missing, the client falls back
- * to a minimal hardcoded prompt and logs a warning.
+ * Supports any OpenAI-compatible endpoint (OpenAI, Azure OpenAI, local LLMs, etc.)
+ * by configuring [AIProviderConfig.baseUrl] and [AIProviderConfig.model].
+ *
+ * All prompt text is resolved externally by the caller (via PromptTemplateService),
+ * making prompts configurable and centralised. This provider receives resolved
+ * prompt strings and never accesses PSI.
  */
 class OpenAIApiClient(
     private val project: Project,
-    private val promptService: PromptTemplateService = PromptTemplateService()
-) : AIGenerationService {
+    private val config: AIProviderConfig
+) : AIProvider {
+
+    override val id: String = config.id
+    override val displayName: String = config.displayName
 
     private val settings: SettingsService by lazy { SettingsService.getInstance(project) }
 
     private val client = HttpClient.newBuilder()
-        .connectTimeout(Duration.ofSeconds(10))
+        .connectTimeout(Duration.ofSeconds(config.timeoutSeconds.toLong()))
         .build()
 
     private val log = Logger.getInstance(OpenAIApiClient::class.java)
 
-    override suspend fun generateMockRequestBody(metadata: EndpointMetadata): String? {
-        val bodyType = metadata.requestBodyType ?: return null
-        val resolved = promptService.resolve(
-            PromptTemplateService.CONTROLLER_MOCK_REQUEST_BODY,
-            mapOf("bodyType" to bodyType)
-        )
-        if (resolved.unresolvedVariables.isNotEmpty()) {
-            log.info("Mock request body template has unresolved variables: ${resolved.unresolvedVariables}")
-        }
-        return callAI(resolved.text)
+    override fun isAvailable(): Boolean {
+        return config.enabled && config.apiKey.isNotBlank() && config.baseUrl.isNotBlank()
     }
 
-    override suspend fun generateExpectedResponse(metadata: EndpointMetadata): String? {
-        val resolved = promptService.resolve(
-            PromptTemplateService.CONTROLLER_EXPECTED_RESPONSE,
-            mapOf(
-                "httpMethod" to metadata.httpMethod.name,
-                "path" to metadata.path
-            )
-        )
-        if (resolved.unresolvedVariables.isNotEmpty()) {
-            log.info("Expected response template has unresolved variables: ${resolved.unresolvedVariables}")
-        }
-        return callAI(resolved.text)
+    override suspend fun generateMockRequestBody(metadata: EndpointMetadata, prompt: String): AIGenerationResult {
+        return callAI(prompt)
     }
 
-    private suspend fun callAI(prompt: String): String? {
+    override suspend fun generateExpectedResponse(metadata: EndpointMetadata, prompt: String): AIGenerationResult {
+        return callAI(prompt)
+    }
+
+    override suspend fun generateFromPrompt(prompt: String): AIGenerationResult {
+        return callAI(prompt)
+    }
+
+    /**
+     * Execute an AI API call with retry logic.
+     *
+     * Retries up to [AIProviderConfig.maxRetries] times on failure,
+     * with a simple linear backoff (1s, 2s, 3s...).
+     */
+    private suspend fun callAI(prompt: String): AIGenerationResult {
+        var lastError: String? = null
+        val maxAttempts = config.maxRetries.coerceAtLeast(1)
+
+        for (attempt in 1..maxAttempts) {
+            val startTime = System.currentTimeMillis()
+            try {
+                val result = performCall(prompt)
+                val latencyMs = System.currentTimeMillis() - startTime
+                if (result != null) {
+                    return AIGenerationResult(
+                        content = result,
+                        providerId = id,
+                        success = true,
+                        latencyMs = latencyMs
+                    )
+                }
+                lastError = "AI API returned null content"
+                log.warn("Attempt $attempt/$maxAttempts: AI API returned null for provider $id")
+            } catch (e: Exception) {
+                lastError = e.message ?: "Unknown error"
+                val latencyMs = System.currentTimeMillis() - startTime
+                log.warn("Attempt $attempt/$maxAttempts: AI call failed for provider $id: ${e.message}")
+                if (attempt < maxAttempts) {
+                    delay(attempt * 1000L)
+                }
+            }
+        }
+
+        return AIGenerationResult(
+            content = null,
+            providerId = id,
+            success = false,
+            errorMessage = lastError ?: "All retry attempts exhausted"
+        )
+    }
+
+    /**
+     * Perform a single HTTP call to the OpenAI-compatible API.
+     * Returns the content string on success, or null on failure.
+     */
+    private suspend fun performCall(prompt: String): String? {
         return withContext(Dispatchers.IO) {
             try {
-                val config = settings.getConfig()
-                log.info("Sending AI generation request (model: ${config.model}, endpoint: ${config.baseUrl.trimEnd('/')}/chat/completions)")
-
-                // Build messages JSON array
                 val messagesArray = JsonArray().apply {
                     val userMessage = JsonObject().apply {
                         addProperty("role", "user")
@@ -84,8 +122,10 @@ class OpenAIApiClient(
                     .header("Content-Type", "application/json")
                     .header("Authorization", "Bearer ${config.apiKey}")
                     .POST(HttpRequest.BodyPublishers.ofString(requestBody.toString()))
-                    .timeout(Duration.ofSeconds(30))
+                    .timeout(Duration.ofSeconds(config.timeoutSeconds.toLong()))
                     .build()
+
+                log.info("Sending AI request to $displayName (model: ${config.model}, endpoint: ${config.baseUrl.trimEnd('/')}/chat/completions)")
 
                 val response = client.send(request, HttpResponse.BodyHandlers.ofString())
                 if (response.statusCode() == 200) {
