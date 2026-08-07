@@ -55,8 +55,20 @@ class SettingsConfigurable(private val project: Project) : Configurable {
         loadProvidersFromSettings()
 
         // Configure table
-        providerTable.setRowHeight(24)
-        providerTable.preferredScrollableViewportSize = Dimension(600, 120)
+        providerTable.setRowHeight(28)
+        providerTable.preferredScrollableViewportSize = Dimension(800, 200)
+
+        // Set column widths
+        val columnModel = providerTable.columnModel
+        columnModel.getColumn(0).preferredWidth = 150  // Display Name
+        columnModel.getColumn(1).preferredWidth = 300  // Base URL
+        columnModel.getColumn(2).preferredWidth = 150  // Model
+        columnModel.getColumn(3).preferredWidth = 60   // Priority
+        columnModel.getColumn(4).preferredWidth = 60   // Enabled
+
+        // Widen combo boxes
+        generationModeCombo.preferredSize = Dimension(300, generationModeCombo.preferredSize.height)
+        testFrameworkCombo.preferredSize = Dimension(300, testFrameworkCombo.preferredSize.height)
 
         // Generation Policy
         generationModeCombo.selectedItem = GenerationMode.fromId(current.generationMode).displayName

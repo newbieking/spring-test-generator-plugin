@@ -23,14 +23,14 @@ class ProviderConfigDialog(
     private val existingState: SettingsService.ProviderState? = null
 ) : DialogWrapper(null) {
 
-    private val idField = JBTextField()
-    private val displayNameField = JBTextField()
-    private val baseUrlField = JBTextField()
-    private val apiKeyField = JBTextField()
-    private val modelField = JBTextField()
-    private val timeoutField = JBTextField()
-    private val retriesField = JBTextField()
-    private val priorityField = JBTextField()
+    private val idField = JBTextField(30)
+    private val displayNameField = JBTextField(30)
+    private val baseUrlField = JBTextField(30)
+    private val apiKeyField = JBTextField(30)
+    private val modelField = JBTextField(30)
+    private val timeoutField = JBTextField(10)
+    private val retriesField = JBTextField(10)
+    private val priorityField = JBTextField(10)
     private val enabledCheckBox = JBCheckBox("Enabled", true)
 
     init {
